@@ -21,6 +21,13 @@ RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip
 # Install Redis extension
 RUN pecl install redis && docker-php-ext-enable redis
 
+# Configure PHP settings
+RUN echo "upload_max_filesize=40M" >> /usr/local/etc/php/conf.d/local.ini && \
+    echo "post_max_size=40M" >> /usr/local/etc/php/conf.d/local.ini && \
+    echo "memory_limit=256M" >> /usr/local/etc/php/conf.d/local.ini && \
+    echo "max_execution_time=300" >> /usr/local/etc/php/conf.d/local.ini && \
+    echo "max_input_time=300" >> /usr/local/etc/php/conf.d/local.ini
+
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
