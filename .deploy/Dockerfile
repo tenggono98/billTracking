@@ -47,13 +47,26 @@ USER $NON_ROOT_USER
 RUN composer install --prefer-dist --no-scripts --no-autoloader
 RUN rm -rf /home/$NON_ROOT_USER/.composer
 
-# Copy entrypoint.sh first (context is .deploy, so entrypoint.sh is at root)
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# Copy all .deploy contents
+# Copy all .deploy contents first
 COPY --chown=$NON_ROOT_USER:$NON_ROOT_GROUP . $LARAVEL_PATH/.deploy/
 COPY config/php/local.ini /usr/local/etc/php/conf.d/local.ini
+
+# Copy entrypoint.sh from the copied files
+# Since context is .deploy, entrypoint.sh should be at root, but we'll copy from the copied location
+RUN if [ -f $LARAVEL_PATH/.deploy/entrypoint.sh ]; then \
+        cp $LARAVEL_PATH/.deploy/entrypoint.sh /entrypoint.sh && \
+        chmod +x /entrypoint.sh; \
+    elif [ -f entrypoint.sh ]; then \
+        cp entrypoint.sh /entrypoint.sh && \
+        chmod +x /entrypoint.sh; \
+    else \
+        echo "ERROR: entrypoint.sh not found!" && \
+        echo "Listing .deploy directory:" && \
+        ls -la $LARAVEL_PATH/.deploy/ 2>/dev/null || echo "Directory not found" && \
+        echo "Listing current directory:" && \
+        ls -la . 2>/dev/null || echo "Directory not found" && \
+        exit 1; \
+    fi
 
 # NOTE: The rest of the application files need to be copied from parent directory
 # This requires Docker Context Path to be '.' (root), not '.deploy'
