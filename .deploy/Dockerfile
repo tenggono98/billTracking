@@ -47,13 +47,13 @@ USER $NON_ROOT_USER
 RUN composer install --prefer-dist --no-scripts --no-autoloader
 RUN rm -rf /home/$NON_ROOT_USER/.composer
 
-# Copy .deploy contents first
-COPY --chown=$NON_ROOT_USER:$NON_ROOT_GROUP . $LARAVEL_PATH/.deploy/
-COPY config/php/local.ini /usr/local/etc/php/conf.d/local.ini
-
-# Copy entrypoint.sh (context is .deploy, so it's at root of context)
+# Copy entrypoint.sh first (context is .deploy, so entrypoint.sh is at root)
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# Copy all .deploy contents
+COPY --chown=$NON_ROOT_USER:$NON_ROOT_GROUP . $LARAVEL_PATH/.deploy/
+COPY config/php/local.ini /usr/local/etc/php/conf.d/local.ini
 
 # NOTE: The rest of the application files need to be copied from parent directory
 # This requires Docker Context Path to be '.' (root), not '.deploy'
