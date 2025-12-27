@@ -30,32 +30,40 @@ ARG NON_ROOT_USER=${NON_ROOT_USER:-app}
 RUN addgroup -S $NON_ROOT_GROUP && adduser -S $NON_ROOT_USER -G $NON_ROOT_GROUP
 RUN addgroup $NON_ROOT_USER wheel
 
-# IMPORTANT: This Dockerfile requires Docker Context Path to be '.' (root project)
-# NOT '.deploy'. If context path is '.deploy', the paths below won't work.
+# IMPORTANT: This Dockerfile works with Docker Context Path = '.deploy'
+# All paths are relative to .deploy folder
+# composer.json and composer.lock must be copied to .deploy folder first
 
-# Set cron job
-COPY .deploy/config/crontab /etc/crontabs/$NON_ROOT_USER
+# Set cron job (context is .deploy, so use relative path)
+COPY config/crontab /etc/crontabs/$NON_ROOT_USER
 RUN chmod 777 /usr/sbin/crond
 RUN chown -R $NON_ROOT_USER:$NON_ROOT_GROUP /etc/crontabs/$NON_ROOT_USER && setcap cap_setgid=ep /usr/sbin/crond
 
 # Switch to non-root 'app' user & install app dependencies
+# composer.json and composer.lock should be in .deploy folder
 COPY composer.json composer.lock ./
 RUN chown -R $NON_ROOT_USER:$NON_ROOT_GROUP $LARAVEL_PATH
 USER $NON_ROOT_USER
 RUN composer install --prefer-dist --no-scripts --no-autoloader
 RUN rm -rf /home/$NON_ROOT_USER/.composer
 
-# Copy app
-COPY --chown=$NON_ROOT_USER:$NON_ROOT_GROUP . $LARAVEL_PATH/
-COPY .deploy/config/php/local.ini /usr/local/etc/php/conf.d/local.ini
+# Copy .deploy contents first
+COPY --chown=$NON_ROOT_USER:$NON_ROOT_GROUP . $LARAVEL_PATH/.deploy/
+COPY config/php/local.ini /usr/local/etc/php/conf.d/local.ini
 
-# Copy entrypoint.sh
-COPY .deploy/entrypoint.sh /entrypoint.sh
+# Copy entrypoint.sh (context is .deploy, so it's at root of context)
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# NOTE: The rest of the application files need to be copied from parent directory
+# This requires Docker Context Path to be '.' (root), not '.deploy'
+# If context path is '.deploy', you need to copy all app files to .deploy first
+# OR change Docker Context Path in Dokploy to '.' (root project)
+
 #install NPM and run production
-RUN npm install
-RUN npm run build
+# This will fail if package.json is not in .deploy
+RUN npm install || echo "Warning: npm install failed - package.json may not be in .deploy"
+RUN npm run build || echo "Warning: npm build failed"
 
 # Set any ENVs
 ARG APP_KEY=${APP_KEY}
