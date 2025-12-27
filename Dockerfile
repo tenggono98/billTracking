@@ -72,6 +72,17 @@ COPY app ./app
 COPY config ./config
 COPY routes ./routes
 
+# Create cache and storage directories required by Laravel
+RUN mkdir -p \
+    storage/framework/cache/data \
+    storage/framework/sessions \
+    storage/framework/views \
+    storage/app/private \
+    storage/app/public \
+    storage/logs \
+    bootstrap/cache \
+    public
+
 # Install only production PHP dependencies
 RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-scripts && \
     composer dump-autoload --optimize --classmap-authoritative
