@@ -28,6 +28,10 @@ RUN echo "upload_max_filesize=40M" >> /usr/local/etc/php/conf.d/local.ini && \
     echo "max_execution_time=300" >> /usr/local/etc/php/conf.d/local.ini && \
     echo "max_input_time=300" >> /usr/local/etc/php/conf.d/local.ini
 
+# Configure PHP-FPM to listen on TCP port 9001 (internal) and log to stdout/stderr
+# Copy custom PHP-FPM pool configuration (ensures TCP listening on 127.0.0.1:9001)
+COPY docker/php-fpm/pool.conf /usr/local/etc/php-fpm.d/www.conf
+
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
@@ -134,12 +138,12 @@ RUN echo '#!/bin/bash' > /usr/local/bin/docker-entrypoint.sh && \
     echo 'exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf' >> /usr/local/bin/docker-entrypoint.sh && \
     chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Expose port 80 for HTTP
-EXPOSE 80
+# Expose port 9000 for HTTP (Nginx)
+EXPOSE 9000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost/up || exit 1
+    CMD curl -f http://localhost:9000/up || exit 1
 
 # Start Supervisor which manages both Nginx and PHP-FPM
 CMD ["/usr/local/bin/docker-entrypoint.sh"]
