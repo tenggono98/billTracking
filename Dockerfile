@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     zip \
     unzip \
     libzip-dev \
+    nginx \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PHP extensions
@@ -93,13 +94,29 @@ COPY --from=build /var/www/html/public/build ./public/build
 # Copy application files
 COPY . .
 
+# Copy Nginx configuration
+COPY docker/nginx/production.conf /etc/nginx/sites-available/default
+RUN rm -rf /etc/nginx/sites-enabled/* && \
+    ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+
+# Create startup script
+RUN echo '#!/bin/bash' > /usr/local/bin/start.sh && \
+    echo 'set -e' >> /usr/local/bin/start.sh && \
+    echo '' >> /usr/local/bin/start.sh && \
+    echo '# Start PHP-FPM in background' >> /usr/local/bin/start.sh && \
+    echo 'php-fpm -D' >> /usr/local/bin/start.sh && \
+    echo '' >> /usr/local/bin/start.sh && \
+    echo '# Start Nginx in foreground' >> /usr/local/bin/start.sh && \
+    echo 'exec nginx -g "daemon off;"' >> /usr/local/bin/start.sh && \
+    chmod +x /usr/local/bin/start.sh
+
 # Set proper permissions
 RUN chown -R www-data:www-data /var/www/html && \
     chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
-# Expose port 9000 for PHP-FPM
-EXPOSE 9000
+# Expose port 80 for HTTP
+EXPOSE 80
 
-# Start PHP-FPM
-CMD ["php-fpm"]
+# Start both Nginx and PHP-FPM
+CMD ["/usr/local/bin/start.sh"]
 
