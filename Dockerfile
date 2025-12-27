@@ -65,6 +65,13 @@ WORKDIR /var/www/html
 # Copy dependency files for production install
 COPY composer.json composer.lock ./
 
+# Copy minimal files needed for composer scripts (artisan needs bootstrap/app.php and routes)
+COPY artisan ./
+COPY bootstrap ./bootstrap
+COPY app ./app
+COPY config ./config
+COPY routes ./routes
+
 # Install only production PHP dependencies
 RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-scripts && \
     composer dump-autoload --optimize --classmap-authoritative
