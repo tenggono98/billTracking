@@ -5,6 +5,7 @@ FROM php:8.2-cli-alpine AS builder
 RUN apk add --no-cache \
     git \
     curl \
+    zlib-dev \
     libpng-dev \
     libzip-dev \
     zip \
@@ -12,6 +13,7 @@ RUN apk add --no-cache \
     oniguruma-dev \
     freetype-dev \
     libjpeg-turbo-dev \
+    curl-dev \
     nodejs \
     npm \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
@@ -59,7 +61,17 @@ RUN apk del nodejs npm
 FROM php:8.2-cli-alpine
 
 # Install PHP extensions and system dependencies
-RUN apk add --no-cache \
+# Install build dependencies first, then runtime libraries
+RUN apk add --no-cache --virtual .build-deps \
+    zlib-dev \
+    libpng-dev \
+    libzip-dev \
+    oniguruma-dev \
+    freetype-dev \
+    libjpeg-turbo-dev \
+    curl-dev \
+    && apk add --no-cache \
+    zlib \
     libpng \
     libzip \
     oniguruma \
@@ -77,7 +89,8 @@ RUN apk add --no-cache \
     zip \
     gd \
     bcmath \
-    opcache
+    opcache \
+    && apk del .build-deps
 
 # Configure PHP for production
 RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache.ini \
