@@ -1,7 +1,5 @@
-FROM php:8.2-fpm
-
-# Set working directory
-WORKDIR /var/www/html
+# Base stage - PHP with extensions
+FROM php:8.2-fpm AS base
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -31,10 +29,59 @@ RUN echo "upload_max_filesize=40M" >> /usr/local/etc/php/conf.d/local.ini && \
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Set proper permissions
-RUN chown -R www-data:www-data /var/www/html
+# Build stage - Install dependencies and build assets
+FROM base AS build
 
-# Expose port 9000 and start php-fpm server
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /var/www/html
+
+# Copy dependency files
+COPY composer.json composer.lock ./
+COPY package.json package-lock.json ./
+
+# Install PHP dependencies (with dev for building)
+RUN composer install --no-interaction --prefer-dist --optimize-autoloader --no-scripts
+
+# Install Node dependencies (with dev for building assets)
+RUN npm ci || npm install
+
+# Copy application files
+COPY . .
+
+# Build frontend assets
+RUN npm run build
+
+# Production stage - Final optimized image
+FROM base AS dokploy
+
+# Set working directory
+WORKDIR /var/www/html
+
+# Copy dependency files for production install
+COPY composer.json composer.lock ./
+
+# Install only production PHP dependencies
+RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-scripts && \
+    composer dump-autoload --optimize --classmap-authoritative
+
+# Copy built assets from build stage
+COPY --from=build /var/www/html/public/build ./public/build
+
+# Copy application files
+COPY . .
+
+# Set proper permissions
+RUN chown -R www-data:www-data /var/www/html && \
+    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+
+# Expose port 9000 for PHP-FPM
 EXPOSE 9000
+
+# Start PHP-FPM
 CMD ["php-fpm"]
 
