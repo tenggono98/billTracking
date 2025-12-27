@@ -14,6 +14,8 @@ RUN apk add --no-cache \
     freetype-dev \
     libjpeg-turbo-dev \
     curl-dev \
+    sqlite-dev \
+    mysql-dev \
     nodejs \
     npm \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
@@ -69,6 +71,8 @@ RUN apk add --no-cache \
     freetype \
     libjpeg-turbo \
     curl \
+    sqlite \
+    mysql-client \
     $PHPIZE_DEPS \
     zlib-dev \
     libpng-dev \
@@ -77,6 +81,8 @@ RUN apk add --no-cache \
     freetype-dev \
     libjpeg-turbo-dev \
     curl-dev \
+    sqlite-dev \
+    mysql-dev \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
         pdo_sqlite \
@@ -88,7 +94,7 @@ RUN apk add --no-cache \
         bcmath \
         opcache \
     && docker-php-source delete \
-    && apk del $PHPIZE_DEPS zlib-dev libpng-dev libzip-dev oniguruma-dev freetype-dev libjpeg-turbo-dev curl-dev
+    && apk del $PHPIZE_DEPS zlib-dev libpng-dev libzip-dev oniguruma-dev freetype-dev libjpeg-turbo-dev curl-dev sqlite-dev mysql-dev
 
 # Configure PHP for production
 RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache.ini \
