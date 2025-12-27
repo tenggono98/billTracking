@@ -31,6 +31,8 @@ RUN addgroup -S $NON_ROOT_GROUP && adduser -S $NON_ROOT_USER -G $NON_ROOT_GROUP
 RUN addgroup $NON_ROOT_USER wheel
 
 # Set cron job
+# Note: If context path is '.deploy', use: COPY config/crontab
+# If context path is '.', use: COPY .deploy/config/crontab
 COPY .deploy/config/crontab /etc/crontabs/$NON_ROOT_USER
 RUN chmod 777 /usr/sbin/crond
 RUN chown -R $NON_ROOT_USER:$NON_ROOT_GROUP /etc/crontabs/$NON_ROOT_USER && setcap cap_setgid=ep /usr/sbin/crond
@@ -46,8 +48,8 @@ RUN rm -rf /home/$NON_ROOT_USER/.composer
 COPY --chown=$NON_ROOT_USER:$NON_ROOT_GROUP . $LARAVEL_PATH/
 COPY .deploy/config/php/local.ini /usr/local/etc/php/conf.d/local.ini
 
-# Copy entrypoint.sh from copied files (works with both context paths)
-RUN cp $LARAVEL_PATH/.deploy/entrypoint.sh /entrypoint.sh || cp $LARAVEL_PATH/entrypoint.sh /entrypoint.sh
+# Copy entrypoint.sh
+COPY .deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 #install NPM and run production
@@ -87,7 +89,6 @@ ARG MAIL_USERNAME=${MAIL_USERNAME}
 ARG MAIL_PASSWORD=${MAIL_PASSWORD}
 ARG MAIL_ENCRYPTION=${MAIL_ENCRYPTION}
 ARG MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS}
-ARG MAIL_ENCRYPTION=${MAIL_ENCRYPTION}
 ARG MAIL_FROM_NAME=${APP_NAME}
 
 ARG PUSHER_APP_ID=${PUSHER_APP_ID}
@@ -108,4 +109,3 @@ ARG FIREBASE_CREDENTIALS=${FIREBASE_CREDENTIALS}
 EXPOSE 80
 
 ENTRYPOINT ["sh", "/entrypoint.sh"]
-
