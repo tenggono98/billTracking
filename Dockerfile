@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     libzip-dev \
     nginx \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PHP extensions
@@ -29,6 +30,9 @@ RUN echo "upload_max_filesize=40M" >> /usr/local/etc/php/conf.d/local.ini && \
 
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# Configure Composer to use cache directory
+ENV COMPOSER_CACHE_DIR=/tmp/composer-cache
 
 # Build stage - Install dependencies and build assets
 FROM base AS build
@@ -99,24 +103,44 @@ COPY docker/nginx/production.conf /etc/nginx/sites-available/default
 RUN rm -rf /etc/nginx/sites-enabled/* && \
     ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
 
-# Create startup script
-RUN echo '#!/bin/bash' > /usr/local/bin/start.sh && \
-    echo 'set -e' >> /usr/local/bin/start.sh && \
-    echo '' >> /usr/local/bin/start.sh && \
-    echo '# Start PHP-FPM in background' >> /usr/local/bin/start.sh && \
-    echo 'php-fpm -D' >> /usr/local/bin/start.sh && \
-    echo '' >> /usr/local/bin/start.sh && \
-    echo '# Start Nginx in foreground' >> /usr/local/bin/start.sh && \
-    echo 'exec nginx -g "daemon off;"' >> /usr/local/bin/start.sh && \
-    chmod +x /usr/local/bin/start.sh
+# Copy Supervisor configuration
+COPY docker/supervisor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+RUN mkdir -p /var/log/supervisor /var/run
 
 # Set proper permissions
 RUN chown -R www-data:www-data /var/www/html && \
     chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
+# Optimize Laravel for production (cache config, routes, views)
+# Note: These will be run at container startup if .env exists
+# We create a startup script that handles this
+RUN echo '#!/bin/bash' > /usr/local/bin/laravel-optimize.sh && \
+    echo 'set -e' >> /usr/local/bin/laravel-optimize.sh && \
+    echo 'if [ -f .env ]; then' >> /usr/local/bin/laravel-optimize.sh && \
+    echo '  php artisan config:cache || true' >> /usr/local/bin/laravel-optimize.sh && \
+    echo '  php artisan route:cache || true' >> /usr/local/bin/laravel-optimize.sh && \
+    echo '  php artisan view:cache || true' >> /usr/local/bin/laravel-optimize.sh && \
+    echo 'fi' >> /usr/local/bin/laravel-optimize.sh && \
+    chmod +x /usr/local/bin/laravel-optimize.sh
+
+# Create entrypoint script
+RUN echo '#!/bin/bash' > /usr/local/bin/docker-entrypoint.sh && \
+    echo 'set -e' >> /usr/local/bin/docker-entrypoint.sh && \
+    echo '' >> /usr/local/bin/docker-entrypoint.sh && \
+    echo '# Run Laravel optimizations' >> /usr/local/bin/docker-entrypoint.sh && \
+    echo '/usr/local/bin/laravel-optimize.sh' >> /usr/local/bin/docker-entrypoint.sh && \
+    echo '' >> /usr/local/bin/docker-entrypoint.sh && \
+    echo '# Start Supervisor' >> /usr/local/bin/docker-entrypoint.sh && \
+    echo 'exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf' >> /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Expose port 80 for HTTP
 EXPOSE 80
 
-# Start both Nginx and PHP-FPM
-CMD ["/usr/local/bin/start.sh"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost/up || exit 1
+
+# Start Supervisor which manages both Nginx and PHP-FPM
+CMD ["/usr/local/bin/docker-entrypoint.sh"]
 
