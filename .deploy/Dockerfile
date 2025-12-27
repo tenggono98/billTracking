@@ -30,9 +30,10 @@ ARG NON_ROOT_USER=${NON_ROOT_USER:-app}
 RUN addgroup -S $NON_ROOT_GROUP && adduser -S $NON_ROOT_USER -G $NON_ROOT_GROUP
 RUN addgroup $NON_ROOT_USER wheel
 
+# IMPORTANT: This Dockerfile requires Docker Context Path to be '.' (root project)
+# NOT '.deploy'. If context path is '.deploy', the paths below won't work.
+
 # Set cron job
-# Note: If context path is '.deploy', use: COPY config/crontab
-# If context path is '.', use: COPY .deploy/config/crontab
 COPY .deploy/config/crontab /etc/crontabs/$NON_ROOT_USER
 RUN chmod 777 /usr/sbin/crond
 RUN chown -R $NON_ROOT_USER:$NON_ROOT_GROUP /etc/crontabs/$NON_ROOT_USER && setcap cap_setgid=ep /usr/sbin/crond
