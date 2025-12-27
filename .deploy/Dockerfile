@@ -46,6 +46,10 @@ RUN rm -rf /home/$NON_ROOT_USER/.composer
 COPY --chown=$NON_ROOT_USER:$NON_ROOT_GROUP . $LARAVEL_PATH/
 COPY .deploy/config/php/local.ini /usr/local/etc/php/conf.d/local.ini
 
+# Copy entrypoint.sh from copied files (works with both context paths)
+RUN cp $LARAVEL_PATH/.deploy/entrypoint.sh /entrypoint.sh || cp $LARAVEL_PATH/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 #install NPM and run production
 RUN npm install
 RUN npm run build
@@ -102,7 +106,6 @@ ARG FIREBASE_CREDENTIALS=${FIREBASE_CREDENTIALS}
 
 # Start app
 EXPOSE 80
-COPY .deploy/entrypoint.sh /
 
-ENTRYPOINT ["sh",  "/entrypoint.sh"]
+ENTRYPOINT ["sh", "/entrypoint.sh"]
 
