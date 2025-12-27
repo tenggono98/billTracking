@@ -60,17 +60,8 @@ RUN apk del nodejs npm
 # Production stage
 FROM php:8.2-cli-alpine
 
-# Install PHP extensions and system dependencies
-# Install build dependencies first, then runtime libraries
-RUN apk add --no-cache --virtual .build-deps \
-    zlib-dev \
-    libpng-dev \
-    libzip-dev \
-    oniguruma-dev \
-    freetype-dev \
-    libjpeg-turbo-dev \
-    curl-dev \
-    && apk add --no-cache \
+# Install system dependencies and PHP extensions
+RUN apk add --no-cache \
     zlib \
     libpng \
     libzip \
@@ -78,19 +69,26 @@ RUN apk add --no-cache --virtual .build-deps \
     freetype \
     libjpeg-turbo \
     curl \
+    $PHPIZE_DEPS \
+    zlib-dev \
+    libpng-dev \
+    libzip-dev \
+    oniguruma-dev \
+    freetype-dev \
+    libjpeg-turbo-dev \
+    curl-dev \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
-    pdo \
-    pdo_sqlite \
-    pdo_mysql \
-    mbstring \
-    xml \
-    curl \
-    zip \
-    gd \
-    bcmath \
-    opcache \
-    && apk del .build-deps
+        pdo_sqlite \
+        pdo_mysql \
+        mbstring \
+        curl \
+        zip \
+        gd \
+        bcmath \
+        opcache \
+    && docker-php-source delete \
+    && apk del $PHPIZE_DEPS zlib-dev libpng-dev libzip-dev oniguruma-dev freetype-dev libjpeg-turbo-dev curl-dev
 
 # Configure PHP for production
 RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache.ini \
