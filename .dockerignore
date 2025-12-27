@@ -1,20 +1,70 @@
-.git
-.gitignore
+# Environment files - handled by Dokploy
 .env
-.env.backup
-.env.production
-.phpunit.result.cache
-docker-compose.yml
-Dockerfile
-.dockerignore
+.env.*
+!.env.example
+
+# Dependencies (will be installed during build)
 node_modules
 vendor
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE and editor files
+.idea
+.vscode
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Laravel specific
 storage/logs/*
 storage/framework/cache/*
 storage/framework/sessions/*
 storage/framework/views/*
 bootstrap/cache/*
+!storage/logs/.gitkeep
+!storage/framework/cache/.gitkeep
+!storage/framework/sessions/.gitkeep
+!storage/framework/views/.gitkeep
+!bootstrap/cache/.gitkeep
+
+# Database
+database/*.sqlite
+database/*.sqlite-journal
+
+# Build artifacts
+public/hot
+public/storage
+public/build
+*.map
+
+# Testing
+tests
+.phpunit.result.cache
+phpunit.xml
+
+# Documentation
+README.md
 *.md
-.DS_Store
+
+# Docker files (except Dockerfile)
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.github
+.gitlab-ci.yml
+
+# Temporary files
+*.tmp
+*.log
+*.cache
+
+# OS files
 Thumbs.db
+.DS_Store
 

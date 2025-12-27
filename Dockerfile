@@ -1,150 +1,129 @@
-# Base stage - PHP with extensions
-FROM php:8.2-fpm AS base
+# Build stage
+FROM php:8.2-cli-alpine AS builder
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies and PHP extensions
+RUN apk add --no-cache \
     git \
     curl \
     libpng-dev \
-    libonig-dev \
-    libxml2-dev \
+    libzip-dev \
     zip \
     unzip \
-    libzip-dev \
-    nginx \
-    supervisor \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install PHP extensions
-RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip
-
-# Install Redis extension
-RUN pecl install redis && docker-php-ext-enable redis
-
-# Configure PHP settings
-RUN echo "upload_max_filesize=40M" >> /usr/local/etc/php/conf.d/local.ini && \
-    echo "post_max_size=40M" >> /usr/local/etc/php/conf.d/local.ini && \
-    echo "memory_limit=256M" >> /usr/local/etc/php/conf.d/local.ini && \
-    echo "max_execution_time=300" >> /usr/local/etc/php/conf.d/local.ini && \
-    echo "max_input_time=300" >> /usr/local/etc/php/conf.d/local.ini
-
-# Configure PHP-FPM to listen on TCP port 9001 (internal) and log to stdout/stderr
-# Copy custom PHP-FPM pool configuration (ensures TCP listening on 127.0.0.1:9001)
-COPY docker/php-fpm/pool.conf /usr/local/etc/php-fpm.d/www.conf
+    oniguruma-dev \
+    freetype-dev \
+    libjpeg-turbo-dev \
+    nodejs \
+    npm \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) \
+    pdo \
+    pdo_sqlite \
+    pdo_mysql \
+    mbstring \
+    xml \
+    curl \
+    zip \
+    gd \
+    bcmath \
+    opcache
 
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
-
-# Configure Composer to use cache directory
-ENV COMPOSER_CACHE_DIR=/tmp/composer-cache
-
-# Build stage - Install dependencies and build assets
-FROM base AS build
-
-# Install Node.js
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /var/www/html
 
 # Copy dependency files
 COPY composer.json composer.lock ./
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json* ./
 
-# Install PHP dependencies (with dev for building)
-RUN composer install --no-interaction --prefer-dist --optimize-autoloader --no-scripts
+# Install PHP dependencies (production only)
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist --optimize-autoloader
 
-# Install Node dependencies (with dev for building assets)
-RUN npm ci || npm install
+# Install Node dependencies (all dependencies needed for build)
+RUN npm ci
 
 # Copy application files
 COPY . .
 
-# Build frontend assets
+# Complete Composer autoloader
+RUN composer dump-autoload --optimize --classmap-authoritative --no-dev
+
+# Build Vite assets
 RUN npm run build
 
-# Production stage - Final optimized image
-FROM base AS dokploy
+# Remove Node.js and npm to reduce image size
+RUN apk del nodejs npm
+
+# Production stage
+FROM php:8.2-cli-alpine
+
+# Install PHP extensions and system dependencies
+RUN apk add --no-cache \
+    libpng \
+    libzip \
+    oniguruma \
+    freetype \
+    libjpeg-turbo \
+    curl \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) \
+    pdo \
+    pdo_sqlite \
+    pdo_mysql \
+    mbstring \
+    xml \
+    curl \
+    zip \
+    gd \
+    bcmath \
+    opcache
+
+# Configure PHP for production
+RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.memory_consumption=256" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.interned_strings_buffer=16" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.max_accelerated_files=20000" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.validate_timestamps=0" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.save_comments=1" >> /usr/local/etc/php/conf.d/opcache.ini
+
+# Create non-root user
+RUN addgroup -g 1000 www && \
+    adduser -u 1000 -G www -s /bin/sh -D www
 
 # Set working directory
 WORKDIR /var/www/html
 
-# Copy dependency files for production install
-COPY composer.json composer.lock ./
+# Copy built application from builder stage
+COPY --from=builder --chown=www:www /var/www/html /var/www/html
 
-# Copy minimal files needed for composer scripts (artisan needs bootstrap/app.php and routes)
-COPY artisan ./
-COPY bootstrap ./bootstrap
-COPY app ./app
-COPY config ./config
-COPY routes ./routes
+# Copy startup script
+COPY --chown=www:www docker/start.sh /usr/local/bin/start.sh
+RUN chmod +x /usr/local/bin/start.sh
 
-# Create cache and storage directories required by Laravel
-RUN mkdir -p \
-    storage/framework/cache/data \
-    storage/framework/sessions \
-    storage/framework/views \
-    storage/app/private \
-    storage/app/public \
+# Create necessary directories and set permissions
+RUN mkdir -p storage/framework/{sessions,views,cache} \
     storage/logs \
     bootstrap/cache \
-    public
+    database \
+    && chown -R www:www storage bootstrap/cache database \
+    && chmod -R 775 storage bootstrap/cache
 
-# Install only production PHP dependencies
-RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-scripts && \
-    composer dump-autoload --optimize --classmap-authoritative
+# Ensure SQLite database file exists and has correct permissions
+RUN touch database/database.sqlite && \
+    chown www:www database/database.sqlite && \
+    chmod 664 database/database.sqlite
 
-# Copy built assets from build stage
-COPY --from=build /var/www/html/public/build ./public/build
+# Switch to non-root user
+USER www
 
-# Copy application files
-COPY . .
-
-# Copy Nginx configuration
-COPY docker/nginx/production.conf /etc/nginx/sites-available/default
-RUN rm -rf /etc/nginx/sites-enabled/* && \
-    ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
-
-# Copy Supervisor configuration
-COPY docker/supervisor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-RUN mkdir -p /var/log/supervisor /var/run
-
-# Set proper permissions
-RUN chown -R www-data:www-data /var/www/html && \
-    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
-
-# Optimize Laravel for production (cache config, routes, views)
-# Note: These will be run at container startup if .env exists
-# We create a startup script that handles this
-RUN echo '#!/bin/bash' > /usr/local/bin/laravel-optimize.sh && \
-    echo 'set -e' >> /usr/local/bin/laravel-optimize.sh && \
-    echo 'if [ -f .env ]; then' >> /usr/local/bin/laravel-optimize.sh && \
-    echo '  php artisan config:cache || true' >> /usr/local/bin/laravel-optimize.sh && \
-    echo '  php artisan route:cache || true' >> /usr/local/bin/laravel-optimize.sh && \
-    echo '  php artisan view:cache || true' >> /usr/local/bin/laravel-optimize.sh && \
-    echo 'fi' >> /usr/local/bin/laravel-optimize.sh && \
-    chmod +x /usr/local/bin/laravel-optimize.sh
-
-# Create entrypoint script
-RUN echo '#!/bin/bash' > /usr/local/bin/docker-entrypoint.sh && \
-    echo 'set -e' >> /usr/local/bin/docker-entrypoint.sh && \
-    echo '' >> /usr/local/bin/docker-entrypoint.sh && \
-    echo '# Run Laravel optimizations' >> /usr/local/bin/docker-entrypoint.sh && \
-    echo '/usr/local/bin/laravel-optimize.sh' >> /usr/local/bin/docker-entrypoint.sh && \
-    echo '' >> /usr/local/bin/docker-entrypoint.sh && \
-    echo '# Start Supervisor' >> /usr/local/bin/docker-entrypoint.sh && \
-    echo 'exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf' >> /usr/local/bin/docker-entrypoint.sh && \
-    chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Expose port 9000 for HTTP (Nginx)
+# Expose port 9000
 EXPOSE 9000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:9000/up || exit 1
+    CMD curl -f http://localhost:9000 || exit 1
 
-# Start Supervisor which manages both Nginx and PHP-FPM
-CMD ["/usr/local/bin/docker-entrypoint.sh"]
+# Start application
+CMD ["/usr/local/bin/start.sh"]
 
