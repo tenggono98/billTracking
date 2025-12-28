@@ -2,14 +2,17 @@
 
 namespace App\Providers;
 
+use App\Actions\Fortify\AuthenticateUser;
 use App\Actions\Fortify\CreateNewUser;
 use App\Actions\Fortify\ResetUserPassword;
+use App\Http\Requests\LoginRequest;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Fortify\Fortify;
+use Laravel\Fortify\Http\Controllers\AuthenticatedSessionController;
 
 class FortifyServiceProvider extends ServiceProvider
 {
@@ -18,7 +21,11 @@ class FortifyServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Override Fortify's LoginRequest with our custom one
+        $this->app->bind(
+            \Laravel\Fortify\Http\Requests\LoginRequest::class,
+            \App\Http\Requests\LoginRequest::class
+        );
     }
 
     /**
@@ -29,6 +36,7 @@ class FortifyServiceProvider extends ServiceProvider
         $this->configureActions();
         $this->configureViews();
         $this->configureRateLimiting();
+        $this->configureAuthentication();
     }
 
     /**
@@ -55,6 +63,25 @@ class FortifyServiceProvider extends ServiceProvider
     }
 
     /**
+     * Configure authentication.
+     */
+    private function configureAuthentication(): void
+    {
+        \Log::info('FortifyServiceProvider::configureAuthentication called');
+        Fortify::authenticateUsing(function (Request $request) {
+            \Log::info('Fortify authenticateUsing callback called', [
+                'all_input' => $request->all(),
+                'has_callback' => !is_null(\Laravel\Fortify\Fortify::$authenticateUsingCallback)
+            ]);
+            $authenticator = new AuthenticateUser();
+            return $authenticator->authenticate($request);
+        });
+        \Log::info('Fortify authenticateUsing registered', [
+            'has_callback' => !is_null(\Laravel\Fortify\Fortify::$authenticateUsingCallback)
+        ]);
+    }
+
+    /**
      * Configure rate limiting.
      */
     private function configureRateLimiting(): void
@@ -64,7 +91,9 @@ class FortifyServiceProvider extends ServiceProvider
         });
 
         RateLimiter::for('login', function (Request $request) {
-            $throttleKey = Str::transliterate(Str::lower($request->input(Fortify::username())).'|'.$request->ip());
+            // Support both phone_number and email for rate limiting
+            $identifier = $request->input('phone_number') ?? $request->input('email') ?? $request->ip();
+            $throttleKey = Str::transliterate(Str::lower($identifier).'|'.$request->ip());
 
             return Limit::perMinute(5)->by($throttleKey);
         });
