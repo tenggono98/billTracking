@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\User;
 // use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
 {
@@ -15,13 +16,22 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
-        User::firstOrCreate(
-            ['email' => 'test@example.com'],
+        $user = User::firstOrCreate(
+            ['phone_number' => '***REMOVED***'],
             [
                 'name' => 'Test User',
-                'password' => 'password',
+                'email' => 'test@example.com',
+                'pin' => Hash::make('***REMOVED***'),
+                'password' => Hash::make('password'),
                 'email_verified_at' => now(),
             ]
         );
+
+        // Ensure pin is set even if user already exists
+        if (!$user->pin || !Hash::check('***REMOVED***', $user->pin)) {
+            $user->pin = Hash::make('***REMOVED***');
+            $user->password = Hash::make('password');
+            $user->save();
+        }
     }
 }
