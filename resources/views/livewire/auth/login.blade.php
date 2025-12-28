@@ -255,16 +255,5 @@
             </a>
         </div>
 
-        <!-- Register Link -->
-        @if (Route::has('register'))
-            <div class="text-center pt-2">
-                <p class="text-sm text-neutral-600 dark:text-neutral-400">
-                    {{ __('Don\'t have an account?') }}
-                    <flux:link :href="route('register')" wire:navigate class="font-semibold text-neutral-900 dark:text-white hover:underline">
-                        {{ __('Sign up') }}
-                    </flux:link>
-                </p>
-            </div>
-        @endif
     </div>
 </x-layouts.auth>

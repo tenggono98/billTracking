@@ -144,7 +144,7 @@ return [
     */
 
     'features' => [
-        Features::registration(),
+        // Features::registration(), // Disabled - users can only be created by other users
         Features::resetPasswords(),
         Features::emailVerification(),
         // Features::updateProfileInformation(),
