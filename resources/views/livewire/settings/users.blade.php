@@ -9,6 +9,8 @@ new class extends Component {
     public $editingUser = null;
     public $name = '';
     public $email = '';
+    public $phone_number = '';
+    public $pin = '';
     public $password = '';
     public $showForm = false;
 
@@ -24,7 +26,7 @@ new class extends Component {
 
     public function create()
     {
-        $this->reset(['editingUser', 'name', 'email', 'password', 'showForm']);
+        $this->reset(['editingUser', 'name', 'email', 'phone_number', 'pin', 'password', 'showForm']);
         $this->showForm = true;
     }
 
@@ -35,6 +37,8 @@ new class extends Component {
             $this->editingUser = $user;
             $this->name = $user->name;
             $this->email = $user->email;
+            $this->phone_number = $user->phone_number ?? '';
+            $this->pin = '';
             $this->password = '';
             $this->showForm = true;
         }
@@ -45,10 +49,19 @@ new class extends Component {
         $rules = [
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email' . ($this->editingUser ? ',' . $this->editingUser->id : ''),
+            'phone_number' => 'nullable|string|max:12|unique:users,phone_number' . ($this->editingUser ? ',' . $this->editingUser->id : ''),
         ];
 
-        if (!$this->editingUser || $this->password) {
+        if (!$this->editingUser) {
             $rules['password'] = 'required|string|min:8';
+            $rules['pin'] = 'required|string|min:4|max:6';
+        } else {
+            if ($this->password) {
+                $rules['password'] = 'required|string|min:8';
+            }
+            if ($this->pin) {
+                $rules['pin'] = 'required|string|min:4|max:6';
+            }
         }
 
         $this->validate($rules);
@@ -58,8 +71,17 @@ new class extends Component {
             'email' => $this->email,
         ];
 
+        if ($this->phone_number) {
+            $data['phone_number'] = $this->phone_number;
+        }
+
         if ($this->password) {
             $data['password'] = Hash::make($this->password);
+        }
+
+        if ($this->pin) {
+            // PIN will be automatically hashed by the model's cast 'hashed'
+            $data['pin'] = $this->pin;
         }
 
         if ($this->editingUser) {
@@ -70,7 +92,7 @@ new class extends Component {
             session()->flash('success', 'Pengguna berhasil dibuat!');
         }
 
-        $this->reset(['editingUser', 'name', 'email', 'password', 'showForm']);
+        $this->reset(['editingUser', 'name', 'email', 'phone_number', 'pin', 'password', 'showForm']);
         $this->loadUsers();
     }
 
@@ -88,7 +110,7 @@ new class extends Component {
 
     public function cancel()
     {
-        $this->reset(['editingUser', 'name', 'email', 'password', 'showForm']);
+        $this->reset(['editingUser', 'name', 'email', 'phone_number', 'pin', 'password', 'showForm']);
     }
     
     public function layout(): string
@@ -139,6 +161,23 @@ new class extends Component {
                         required
                     />
                     <x-ui.input 
+                        label="Nomor HP" 
+                        name="phone_number" 
+                        type="text"
+                        wire:model="phone_number"
+                        placeholder="***REMOVED***"
+                        maxlength="12"
+                    />
+                    <x-ui.input 
+                        label="PIN {{ $editingUser ? '(kosongkan untuk mempertahankan yang sekarang)' : '' }}" 
+                        name="pin" 
+                        type="password"
+                        wire:model="pin"
+                        placeholder="Masukkan PIN (4-6 digit)"
+                        maxlength="6"
+                        :required="!$editingUser"
+                    />
+                    <x-ui.input 
                         label="Kata Sandi {{ $editingUser ? '(kosongkan untuk mempertahankan yang sekarang)' : '' }}" 
                         name="password" 
                         type="password"
@@ -164,6 +203,7 @@ new class extends Component {
                         <tr class="border-b border-neutral-200 dark:border-neutral-700">
                             <th class="px-4 py-2 text-left text-sm font-semibold">Nama</th>
                             <th class="px-4 py-2 text-left text-sm font-semibold">Email</th>
+                            <th class="px-4 py-2 text-left text-sm font-semibold">Nomor HP</th>
                             <th class="px-4 py-2 text-left text-sm font-semibold">Jumlah Bill</th>
                             <th class="px-4 py-2 text-left text-sm font-semibold">Aksi</th>
                         </tr>
@@ -173,6 +213,7 @@ new class extends Component {
                             <tr class="border-b border-neutral-200 dark:border-neutral-700">
                                 <td class="px-4 py-2 text-sm">{{ $user->name }}</td>
                                 <td class="px-4 py-2 text-sm">{{ $user->email }}</td>
+                                <td class="px-4 py-2 text-sm">{{ $user->phone_number ?? '-' }}</td>
                                 <td class="px-4 py-2 text-sm">{{ $user->bills()->count() }}</td>
                                 <td class="px-4 py-2 text-sm">
                                     <div class="flex gap-2">
@@ -200,7 +241,7 @@ new class extends Component {
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="4" class="px-4 py-8 text-center text-sm text-neutral-500">
+                                <td colspan="5" class="px-4 py-8 text-center text-sm text-neutral-500">
                                     Tidak ada pengguna ditemukan
                                 </td>
                             </tr>
