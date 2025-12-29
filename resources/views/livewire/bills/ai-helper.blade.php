@@ -20,7 +20,7 @@ new class extends Component {
     public $branchAssignments = []; // Format: [bill_index => [branch_ids]]
     public $errorMessage = '';
     public $successMessage = '';
-    
+
     // Manual bill properties
     public $manualBills = []; // Format: [['total_amount' => '', 'payment_amount' => '', 'date' => '', 'bill_image' => null, 'payment_proof_image' => null, ...]]
     public $showManualForm = false;
@@ -79,7 +79,7 @@ new class extends Component {
         try {
             $this->errorMessage = '';
             $this->successMessage = '';
-            
+
             if (empty(trim($this->inputText))) {
                 $this->errorMessage = 'Silakan masukkan teks yang berisi informasi tagihan.';
                 return;
@@ -98,10 +98,10 @@ new class extends Component {
 
             $this->extracting = false;
             $this->showModal = false;
-            
+
             // Store extracted bills in session for create component to pick up
             session()->put('ai_extracted_bills', $extractedBills);
-            
+
             // Redirect to create page
             return $this->redirect(route('bills.create'), navigate: true);
 
@@ -119,7 +119,7 @@ new class extends Component {
         try {
             $this->errorMessage = '';
             $this->successMessage = '';
-            
+
             if (empty(trim($this->inputText))) {
                 $this->errorMessage = 'Silakan masukkan teks yang berisi informasi tagihan.';
                 return;
@@ -165,6 +165,12 @@ new class extends Component {
                 if (!isset($this->extractedBills[$index]['extraction_step_payment'])) {
                     $this->extractedBills[$index]['extraction_step_payment'] = '';
                 }
+                if (!isset($this->extractedBills[$index]['show_new_branch'])) {
+                    $this->extractedBills[$index]['show_new_branch'] = false;
+                }
+                if (!isset($this->extractedBills[$index]['new_branch_name'])) {
+                    $this->extractedBills[$index]['new_branch_name'] = '';
+                }
             }
 
             $this->extracting = false;
@@ -194,14 +200,16 @@ new class extends Component {
             'extracting_payment' => false,
             'extraction_step_bill' => '',
             'extraction_step_payment' => '',
+            'show_new_branch' => false,
+            'new_branch_name' => '',
         ];
-        
+
         // Initialize branch assignment for this manual bill
         $manualIndex = count($this->extractedBills) + count($this->manualBills) - 1;
         if (!isset($this->branchAssignments[$manualIndex])) {
             $this->branchAssignments[$manualIndex] = [];
         }
-        
+
         $this->showManualForm = true;
     }
 
@@ -210,7 +218,7 @@ new class extends Component {
         if (isset($this->manualBills[$index])) {
             unset($this->manualBills[$index]);
             $this->manualBills = array_values($this->manualBills);
-            
+
             // Reindex branch assignments
             $allBills = array_merge($this->extractedBills, $this->manualBills);
             $newAssignments = [];
@@ -271,18 +279,38 @@ new class extends Component {
             }
         }
     }
-    
+
     public function updateManualCurrencyValue($index, $field, $value)
     {
         if (isset($this->manualBills[$index])) {
             $this->manualBills[$index][$field] = (float) $value;
         }
     }
-    
+
     public function updateExtractedCurrencyValue($index, $field, $value)
     {
         if (isset($this->extractedBills[$index])) {
             $this->extractedBills[$index][$field] = (float) $value;
+        }
+    }
+
+    public function updated($propertyName)
+    {
+        // Handle file uploads for extracted bills
+        if (preg_match('/^extractedBills\.(\d+)\.payment_proof_image$/', $propertyName, $matches)) {
+            $index = (int) $matches[1];
+            $this->handlePaymentImageUpdate('extracted', $index);
+        } elseif (preg_match('/^extractedBills\.(\d+)\.bill_image$/', $propertyName, $matches)) {
+            $index = (int) $matches[1];
+            $this->handleBillImageUpdate('extracted', $index);
+        }
+        // Handle file uploads for manual bills
+        elseif (preg_match('/^manualBills\.(\d+)\.payment_proof_image$/', $propertyName, $matches)) {
+            $index = (int) $matches[1];
+            $this->handlePaymentImageUpdate('manual', $index);
+        } elseif (preg_match('/^manualBills\.(\d+)\.bill_image$/', $propertyName, $matches)) {
+            $index = (int) $matches[1];
+            $this->handleBillImageUpdate('manual', $index);
         }
     }
 
@@ -297,76 +325,76 @@ new class extends Component {
         $hasPreviousValue = $previousAmount > 0;
 
         $this->manualBills[$index]['extracting_bill'] = true;
-        
+
         // Only reset to 0 if there's no previous value
         if (!$hasPreviousValue) {
             $this->manualBills[$index]['total_amount'] = 0;
         }
-        
+
         $this->manualBills[$index]['extraction_step_bill'] = 'Membaca file gambar...';
-        
+
         // Dispatch extraction started event
         $this->dispatch('extraction-started', ['type' => 'total', 'index' => $index]);
-        
+
         try {
             $tempPath = $this->manualBills[$index]['bill_image']->getRealPath();
-            
+
             if (!file_exists($tempPath)) {
                 $path = $this->manualBills[$index]['bill_image']->store('temp', 'public');
                 $tempPath = storage_path('app/public/' . $path);
             }
-            
+
             if (!file_exists($tempPath)) {
                 throw new \Exception('Gagal mengakses file gambar yang diunggah');
             }
-            
+
             $this->manualBills[$index]['extraction_step_bill'] = 'Mengekstrak teks dari gambar (OCR)...';
-            
+
             $imageContent = file_get_contents($tempPath);
             if (empty($imageContent)) {
                 throw new \Exception('File gambar kosong');
             }
-            
+
             $this->manualBills[$index]['extraction_step_bill'] = 'Menganalisis dengan AI untuk mengekstrak total tagihan...';
-            
+
             $service = app(AiExtractionService::class);
             $amount = $service->extractAmountFromImageContent($imageContent, 'bill');
-            
+
             if ($amount && $amount > 0) {
                 // Ensure amount is a clean numeric value
                 $cleanAmount = (float) $amount;
-                
+
                 // Update the amount - ensure Livewire detects the change by reassigning the array
                 $bill = $this->manualBills[$index];
                 $bill['total_amount'] = $cleanAmount;
                 $bill['extraction_step_bill'] = 'Ekstraksi berhasil diselesaikan!';
                 $this->manualBills[$index] = $bill;
-                
+
                 // Force Livewire to detect the change
                 $this->dispatch('extraction-completed', ['type' => 'total', 'index' => $index]);
                 $this->dispatch('amount-extracted', ['type' => 'total', 'index' => $index, 'amount' => $cleanAmount]);
-                
+
                 // Direct JavaScript update to ensure currency input gets the value
                 $this->dispatch('update-currency-input', [
                     'model' => "manualBills.{$index}.total_amount",
                     'value' => $cleanAmount
                 ]);
-                
+
                 // Also dispatch browser event for direct JavaScript execution
                 $this->dispatch('currency-value-updated', [
                     'model' => "manualBills.{$index}.total_amount",
                     'value' => $cleanAmount
                 ], to: 'browser');
-                
+
                 // Force update by dispatching a custom event that will be caught by Alpine.js
                 $this->dispatch('force-currency-update', [
                     'model' => "manualBills.{$index}.total_amount",
                     'value' => $cleanAmount
                 ]);
-                
+
                 // Also call direct update method
                 $this->updateManualCurrencyValue($index, 'total_amount', $cleanAmount);
-                
+
                 session()->flash('success', 'Jumlah berhasil diekstrak: Rp ' . \App\Helpers\CurrencyHelper::format($cleanAmount));
             } else {
                 // Restore previous value if extraction failed and there was a previous value
@@ -404,76 +432,76 @@ new class extends Component {
         $hasPreviousValue = $previousAmount > 0;
 
         $this->manualBills[$index]['extracting_payment'] = true;
-        
+
         // Only reset to 0 if there's no previous value
         if (!$hasPreviousValue) {
             $this->manualBills[$index]['payment_amount'] = 0;
         }
-        
+
         $this->manualBills[$index]['extraction_step_payment'] = 'Membaca file gambar...';
-        
+
         // Dispatch extraction started event
         $this->dispatch('extraction-started', ['type' => 'payment', 'index' => $index]);
-        
+
         try {
             $tempPath = $this->manualBills[$index]['payment_proof_image']->getRealPath();
-            
+
             if (!file_exists($tempPath)) {
                 $path = $this->manualBills[$index]['payment_proof_image']->store('temp', 'public');
                 $tempPath = storage_path('app/public/' . $path);
             }
-            
+
             if (!file_exists($tempPath)) {
                 throw new \Exception('Gagal mengakses file gambar yang diunggah');
             }
-            
+
             $this->manualBills[$index]['extraction_step_payment'] = 'Mengekstrak teks dari gambar (OCR)...';
-            
+
             $imageContent = file_get_contents($tempPath);
             if (empty($imageContent)) {
                 throw new \Exception('File gambar kosong');
             }
-            
+
             $this->manualBills[$index]['extraction_step_payment'] = 'Menganalisis dengan AI untuk mengekstrak jumlah pembayaran...';
-            
+
             $service = app(AiExtractionService::class);
             $amount = $service->extractAmountFromImageContent($imageContent, 'transfer');
-            
+
             if ($amount && $amount > 0) {
                 // Ensure amount is a clean numeric value
                 $cleanAmount = (float) $amount;
-                
+
                 // Update the amount - ensure Livewire detects the change by reassigning the array
                 $bill = $this->manualBills[$index];
                 $bill['payment_amount'] = $cleanAmount;
                 $bill['extraction_step_payment'] = 'Ekstraksi berhasil diselesaikan!';
                 $this->manualBills[$index] = $bill;
-                
+
                 // Force Livewire to detect the change
                 $this->dispatch('extraction-completed', ['type' => 'payment', 'index' => $index]);
                 $this->dispatch('amount-extracted', ['type' => 'payment', 'index' => $index, 'amount' => $cleanAmount]);
-                
+
                 // Direct JavaScript update to ensure currency input gets the value
                 $this->dispatch('update-currency-input', [
                     'model' => "manualBills.{$index}.payment_amount",
                     'value' => $cleanAmount
                 ]);
-                
+
                 // Also dispatch browser event for direct JavaScript execution
                 $this->dispatch('currency-value-updated', [
                     'model' => "manualBills.{$index}.payment_amount",
                     'value' => $cleanAmount
                 ], to: 'browser');
-                
+
                 // Force update by dispatching a custom event that will be caught by Alpine.js
                 $this->dispatch('force-currency-update', [
                     'model' => "manualBills.{$index}.payment_amount",
                     'value' => $cleanAmount
                 ]);
-                
+
                 // Also call direct update method
                 $this->updateManualCurrencyValue($index, 'payment_amount', $cleanAmount);
-                
+
                 session()->flash('success', 'Jumlah berhasil diekstrak: Rp ' . \App\Helpers\CurrencyHelper::format($cleanAmount));
             } else {
                 // Restore previous value if extraction failed and there was a previous value
@@ -511,56 +539,56 @@ new class extends Component {
         $hasPreviousValue = $previousAmount > 0;
 
         $this->extractedBills[$index]['extracting_bill'] = true;
-        
+
         // Only reset to 0 if there's no previous value
         if (!$hasPreviousValue) {
             $this->extractedBills[$index]['total_amount'] = 0;
         }
-        
+
         $this->extractedBills[$index]['extraction_step_bill'] = 'Membaca file gambar...';
-        
+
         // Dispatch extraction started event
         $this->dispatch('extraction-started', ['type' => 'total', 'index' => $index]);
-        
+
         try {
             $tempPath = $this->extractedBills[$index]['bill_image']->getRealPath();
-            
+
             if (!file_exists($tempPath)) {
                 $path = $this->extractedBills[$index]['bill_image']->store('temp', 'public');
                 $tempPath = storage_path('app/public/' . $path);
             }
-            
+
             if (!file_exists($tempPath)) {
                 throw new \Exception('Gagal mengakses file gambar yang diunggah');
             }
-            
+
             $this->extractedBills[$index]['extraction_step_bill'] = 'Mengekstrak teks dari gambar (OCR)...';
-            
+
             $imageContent = file_get_contents($tempPath);
             if (empty($imageContent)) {
                 throw new \Exception('File gambar kosong');
             }
-            
+
             $this->extractedBills[$index]['extraction_step_bill'] = 'Menganalisis dengan AI untuk mengekstrak total tagihan...';
-            
+
             $service = app(AiExtractionService::class);
             $amount = $service->extractAmountFromImageContent($imageContent, 'bill');
-            
+
             if ($amount && $amount > 0) {
                 $cleanAmount = (float) $amount;
                 $this->extractedBills[$index]['total_amount'] = $cleanAmount;
                 $this->extractedBills[$index]['extraction_step_bill'] = 'Ekstraksi berhasil diselesaikan!';
-                
+
                 $this->dispatch('extraction-completed', ['type' => 'total', 'index' => $index]);
                 $this->dispatch('amount-extracted', ['type' => 'total', 'index' => $index, 'amount' => $cleanAmount]);
-                
+
                 $this->dispatch('update-currency-input', [
                     'model' => "extractedBills.{$index}.total_amount",
                     'value' => $cleanAmount
                 ]);
-                
+
                 $this->updateExtractedCurrencyValue($index, 'total_amount', $cleanAmount);
-                
+
                 session()->flash('success', 'Jumlah berhasil diekstrak: Rp ' . \App\Helpers\CurrencyHelper::format($cleanAmount));
             } else {
                 if ($hasPreviousValue) {
@@ -596,56 +624,56 @@ new class extends Component {
         $hasPreviousValue = $previousAmount > 0;
 
         $this->extractedBills[$index]['extracting_payment'] = true;
-        
+
         // Only reset to 0 if there's no previous value
         if (!$hasPreviousValue) {
             $this->extractedBills[$index]['payment_amount'] = 0;
         }
-        
+
         $this->extractedBills[$index]['extraction_step_payment'] = 'Membaca file gambar...';
-        
+
         // Dispatch extraction started event
         $this->dispatch('extraction-started', ['type' => 'payment', 'index' => $index]);
-        
+
         try {
             $tempPath = $this->extractedBills[$index]['payment_proof_image']->getRealPath();
-            
+
             if (!file_exists($tempPath)) {
                 $path = $this->extractedBills[$index]['payment_proof_image']->store('temp', 'public');
                 $tempPath = storage_path('app/public/' . $path);
             }
-            
+
             if (!file_exists($tempPath)) {
                 throw new \Exception('Gagal mengakses file gambar yang diunggah');
             }
-            
+
             $this->extractedBills[$index]['extraction_step_payment'] = 'Mengekstrak teks dari gambar (OCR)...';
-            
+
             $imageContent = file_get_contents($tempPath);
             if (empty($imageContent)) {
                 throw new \Exception('File gambar kosong');
             }
-            
+
             $this->extractedBills[$index]['extraction_step_payment'] = 'Menganalisis dengan AI untuk mengekstrak jumlah pembayaran...';
-            
+
             $service = app(AiExtractionService::class);
             $amount = $service->extractAmountFromImageContent($imageContent, 'transfer');
-            
+
             if ($amount && $amount > 0) {
                 $cleanAmount = (float) $amount;
                 $this->extractedBills[$index]['payment_amount'] = $cleanAmount;
                 $this->extractedBills[$index]['extraction_step_payment'] = 'Ekstraksi berhasil diselesaikan!';
-                
+
                 $this->dispatch('extraction-completed', ['type' => 'payment', 'index' => $index]);
                 $this->dispatch('amount-extracted', ['type' => 'payment', 'index' => $index, 'amount' => $cleanAmount]);
-                
+
                 $this->dispatch('update-currency-input', [
                     'model' => "extractedBills.{$index}.payment_amount",
                     'value' => $cleanAmount
                 ]);
-                
+
                 $this->updateExtractedCurrencyValue($index, 'payment_amount', $cleanAmount);
-                
+
                 session()->flash('success', 'Jumlah berhasil diekstrak: Rp ' . \App\Helpers\CurrencyHelper::format($cleanAmount));
             } else {
                 if ($hasPreviousValue) {
@@ -677,7 +705,7 @@ new class extends Component {
         }
 
         $index = array_search($branchId, $this->branchAssignments[$billIndex]);
-        
+
         if ($index !== false) {
             // Remove branch
             unset($this->branchAssignments[$billIndex][$index]);
@@ -692,54 +720,64 @@ new class extends Component {
     {
         try {
             $this->errorMessage = '';
-            
+
             // Combine extracted bills and manual bills
             $allBills = array_merge($this->extractedBills, $this->manualBills);
-            
-            // Validate that all bills have at least one branch selected
+
+            // Validate that all bills have at least one branch selected or new branch name
             foreach ($allBills as $index => $bill) {
-                if (empty($this->branchAssignments[$index]) || count($this->branchAssignments[$index]) === 0) {
-                    $this->errorMessage = 'Silakan pilih minimal satu cabang untuk setiap tagihan.';
-                    return;
+                $isExtracted = $index < count($this->extractedBills);
+                $billData = $isExtracted ? $this->extractedBills[$index] : $this->manualBills[$index - count($this->extractedBills)];
+
+                if (($billData['show_new_branch'] ?? false)) {
+                    if (empty(trim($billData['new_branch_name'] ?? ''))) {
+                        $this->errorMessage = 'Nama cabang baru harus diisi untuk tagihan #' . ($index + 1);
+                        return;
+                    }
+                } else {
+                    if (empty($this->branchAssignments[$index]) || count($this->branchAssignments[$index]) === 0) {
+                        $this->errorMessage = 'Silakan pilih minimal satu cabang untuk setiap tagihan.';
+                        return;
+                    }
                 }
             }
-            
+
             // Validate extracted bills data
             foreach ($this->extractedBills as $index => $bill) {
                 $totalAmount = \App\Helpers\CurrencyHelper::sanitize($bill['total_amount']) ?? 0;
                 $paymentAmount = \App\Helpers\CurrencyHelper::sanitize($bill['payment_amount']) ?? 0;
-                
+
                 if ($totalAmount <= 0) {
                     $this->errorMessage = "Total tagihan wajib diisi untuk tagihan #" . ($index + 1);
                     return;
                 }
-                
+
                 if ($paymentAmount <= 0) {
                     $this->errorMessage = "Jumlah pembayaran wajib diisi untuk tagihan #" . ($index + 1);
                     return;
                 }
-                
+
                 if (empty($bill['date'])) {
                     $this->errorMessage = "Tanggal wajib diisi untuk tagihan #" . ($index + 1);
                     return;
                 }
             }
-            
+
             // Validate manual bills data
             foreach ($this->manualBills as $index => $bill) {
                 $totalAmount = \App\Helpers\CurrencyHelper::sanitize($bill['total_amount']) ?? 0;
                 $paymentAmount = \App\Helpers\CurrencyHelper::sanitize($bill['payment_amount']) ?? 0;
-                
+
                 if ($totalAmount <= 0) {
                     $this->errorMessage = "Total tagihan wajib diisi untuk tagihan manual #" . (count($this->extractedBills) + $index + 1);
                     return;
                 }
-                
+
                 if ($paymentAmount <= 0) {
                     $this->errorMessage = "Jumlah pembayaran wajib diisi untuk tagihan manual #" . (count($this->extractedBills) + $index + 1);
                     return;
                 }
-                
+
                 if (empty($bill['date'])) {
                     $this->errorMessage = "Tanggal wajib diisi untuk tagihan manual #" . (count($this->extractedBills) + $index + 1);
                     return;
@@ -752,22 +790,38 @@ new class extends Component {
             // Create bills for each extracted bill and selected branches
             foreach ($this->extractedBills as $index => $billData) {
                 $branchIds = $this->branchAssignments[$index] ?? [];
-                
+
+                // Handle new branch creation
+                if ($billData['show_new_branch'] ?? false) {
+                    $newBranchName = trim($billData['new_branch_name'] ?? '');
+                    if (!empty($newBranchName)) {
+                        // Check if branch already exists
+                        $existingBranch = Branch::where('name', $newBranchName)->first();
+                        if ($existingBranch) {
+                            $branchIds = [$existingBranch->id];
+                        } else {
+                            // Create new branch
+                            $newBranch = Branch::create(['name' => $newBranchName]);
+                            $branchIds = [$newBranch->id];
+                        }
+                    }
+                }
+
                 // Sanitize amounts
                 $totalAmount = \App\Helpers\CurrencyHelper::sanitize($billData['total_amount']) ?? 0;
                 $paymentAmount = \App\Helpers\CurrencyHelper::sanitize($billData['payment_amount']) ?? 0;
-                
+
                 // Store images
                 $billImagePath = null;
                 if (isset($billData['bill_image']) && $billData['bill_image']) {
                     $billImagePath = $billData['bill_image']->store('bills', 'public');
                 }
-                
+
                 $paymentProofPath = null;
                 if (isset($billData['payment_proof_image']) && $billData['payment_proof_image']) {
                     $paymentProofPath = $billData['payment_proof_image']->store('payments', 'public');
                 }
-                
+
                 foreach ($branchIds as $branchId) {
                     // Calculate status
                     $status = 'pending';
@@ -793,31 +847,47 @@ new class extends Component {
                         'status' => $status,
                         'date' => $billData['date'],
                     ]);
-                    
+
                     $createdCount++;
                 }
             }
-            
+
             // Create bills for manual bills
             foreach ($this->manualBills as $manualIndex => $billData) {
                 $index = count($this->extractedBills) + $manualIndex;
                 $branchIds = $this->branchAssignments[$index] ?? [];
-                
+
+                // Handle new branch creation
+                if ($billData['show_new_branch'] ?? false) {
+                    $newBranchName = trim($billData['new_branch_name'] ?? '');
+                    if (!empty($newBranchName)) {
+                        // Check if branch already exists
+                        $existingBranch = Branch::where('name', $newBranchName)->first();
+                        if ($existingBranch) {
+                            $branchIds = [$existingBranch->id];
+                        } else {
+                            // Create new branch
+                            $newBranch = Branch::create(['name' => $newBranchName]);
+                            $branchIds = [$newBranch->id];
+                        }
+                    }
+                }
+
                 // Sanitize amounts
                 $totalAmount = \App\Helpers\CurrencyHelper::sanitize($billData['total_amount']) ?? 0;
                 $paymentAmount = \App\Helpers\CurrencyHelper::sanitize($billData['payment_amount']) ?? 0;
-                
+
                 // Store images
                 $billImagePath = null;
                 if (isset($billData['bill_image']) && $billData['bill_image']) {
                     $billImagePath = $billData['bill_image']->store('bills', 'public');
                 }
-                
+
                 $paymentProofPath = null;
                 if (isset($billData['payment_proof_image']) && $billData['payment_proof_image']) {
                     $paymentProofPath = $billData['payment_proof_image']->store('payments', 'public');
                 }
-                
+
                 // Calculate status
                 $status = 'pending';
                 if ($totalAmount > 0) {
@@ -831,7 +901,7 @@ new class extends Component {
                         $status = 'paid';
                     }
                 }
-                
+
                 foreach ($branchIds as $branchId) {
                     Bill::create([
                         'branch_id' => $branchId,
@@ -843,18 +913,18 @@ new class extends Component {
                         'status' => $status,
                         'date' => $billData['date'],
                     ]);
-                    
+
                     $createdCount++;
                 }
             }
 
             DB::commit();
-            
+
             $this->successMessage = "Berhasil membuat {$createdCount} tagihan!";
             session()->flash('success', $this->successMessage);
-            
+
             $this->closeModals();
-            
+
             // Redirect to bills index to show the new bills
             return $this->redirect(route('bills.index'), navigate: true);
 
@@ -866,7 +936,7 @@ new class extends Component {
             ]);
         }
     }
-    
+
     public function layout(): string
     {
         return 'components.layouts.app';
@@ -888,7 +958,7 @@ new class extends Component {
     </x-ui.button>
 
     <!-- AI Helper Input Modal -->
-    <x-ui.modal 
+    <x-ui.modal
         wire:model="showModal"
         title="AI Helper - Buat Tagihan dari Teks"
         size="2xl"
@@ -1009,7 +1079,7 @@ new class extends Component {
     </x-ui.modal>
 
     <!-- Branch Assignment Modal -->
-    <x-ui.modal 
+    <x-ui.modal
         wire:model="showBranchModal"
         title="Pilih Cabang untuk Tagihan"
         size="4xl"
@@ -1061,51 +1131,15 @@ new class extends Component {
 
                     <!-- Bill Form - Same as Manual -->
                     <div class="space-y-3">
-                        <!-- Amounts and Date -->
-                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                            <div
-                                x-data="{}"
-                                @force-currency-update.window="
-                                    if ($event.detail && $event.detail.model === 'extractedBills.{{ $index }}.total_amount') {
-                                        \$wire.call('updateExtractedCurrencyValue', {{ $index }}, 'total_amount', $event.detail.value);
-                                        \$wire.set('extractedBills.{{ $index }}.total_amount', $event.detail.value);
-                                    }
-                                ">
-                                <x-ui.currency-input 
-                                    label="Total Tagihan" 
-                                    name="extractedBills.{{ $index }}.total_amount" 
-                                    :value="$bill['total_amount']"
-                                    wireModel="extractedBills.{{ $index }}.total_amount"
-                                    placeholder="0"
-                                    required
-                                />
-                            </div>
-                            <div
-                                x-data="{}"
-                                @force-currency-update.window="
-                                    if ($event.detail && $event.detail.model === 'extractedBills.{{ $index }}.payment_amount') {
-                                        \$wire.call('updateExtractedCurrencyValue', {{ $index }}, 'payment_amount', $event.detail.value);
-                                        \$wire.set('extractedBills.{{ $index }}.payment_amount', $event.detail.value);
-                                    }
-                                ">
-                                <x-ui.currency-input 
-                                    label="Jumlah Pembayaran" 
-                                    name="extractedBills.{{ $index }}.payment_amount" 
-                                    :value="$bill['payment_amount']"
-                                    wireModel="extractedBills.{{ $index }}.payment_amount"
-                                    placeholder="0"
-                                    required
-                                />
-                            </div>
-                            <div>
-                                <x-ui.input 
-                                    label="Tanggal Transaksi" 
-                                    name="extractedBills.{{ $index }}.date" 
-                                    type="date"
-                                    wire:model="extractedBills.{{ $index }}.date"
-                                    required
-                                />
-                            </div>
+                        <!-- Date -->
+                        <div>
+                            <x-ui.input
+                                label="Tanggal Transaksi"
+                                name="extractedBills.{{ $index }}.date"
+                                type="date"
+                                wire:model="extractedBills.{{ $index }}.date"
+                                required
+                            />
                         </div>
 
                         <!-- Images Upload - Compact -->
@@ -1116,8 +1150,8 @@ new class extends Component {
                                     <h4 class="text-xs font-semibold text-neutral-900 dark:text-neutral-100">Bukti Pembayaran</h4>
                                     <span class="px-1.5 py-0.5 text-xs bg-neutral-100 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-400 rounded">Opsional</span>
                                 </div>
-                                <div 
-                                    x-data="{ 
+                                <div
+                                    x-data="{
                                         isDragging: false,
                                         handleDrop(e) {
                                             this.isDragging = false;
@@ -1152,7 +1186,15 @@ new class extends Component {
                                                 </svg>
                                             </div>
                                         </div>
-                                        <label 
+                                        @if($bill['payment_amount'] > 0 && !($bill['extracting_payment'] ?? false))
+                                            <div class="mb-2 p-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                                                <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">Jumlah yang diekstrak:</p>
+                                                <p class="text-base font-semibold text-green-600 dark:text-green-400">
+                                                    Rp {{ \App\Helpers\CurrencyHelper::format($bill['payment_amount']) }}
+                                                </p>
+                                            </div>
+                                        @endif
+                                        <label
                                             for="extracted_payment_proof_{{ $index }}"
                                             class="flex items-center justify-center w-full px-3 py-1.5 border-2 border-dashed border-neutral-300 dark:border-neutral-600 rounded-lg cursor-pointer transition-colors hover:border-blue-400 dark:hover:border-blue-500 bg-white dark:bg-neutral-800 text-xs"
                                         >
@@ -1160,18 +1202,17 @@ new class extends Component {
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                                             </svg>
                                             <span class="text-neutral-600 dark:text-neutral-400 font-medium">Upload Baru</span>
-                                            <input 
-                                                type="file" 
+                                            <input
+                                                type="file"
                                                 id="extracted_payment_proof_{{ $index }}"
                                                 wire:model="extractedBills.{{ $index }}.payment_proof_image"
-                                                wire:change="$wire.handlePaymentImageUpdate('extracted', {{ $index }})"
                                                 wire:loading.attr="disabled"
                                                 accept="image/*"
                                                 class="hidden"
                                             />
                                         </label>
                                     @else
-                                        <label 
+                                        <label
                                             for="extracted_payment_proof_{{ $index }}"
                                             class="relative flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer transition-colors overflow-hidden"
                                             :class="isDragging ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'border-neutral-300 dark:border-neutral-600 hover:border-blue-400 dark:hover:border-blue-500'"
@@ -1184,11 +1225,10 @@ new class extends Component {
                                                     <span class="font-semibold">Klik untuk upload</span><br>atau drag and drop
                                                 </p>
                                             </div>
-                                            <input 
-                                                type="file" 
+                                            <input
+                                                type="file"
                                                 id="extracted_payment_proof_{{ $index }}"
                                                 wire:model="extractedBills.{{ $index }}.payment_proof_image"
-                                                wire:change="$wire.handlePaymentImageUpdate('extracted', {{ $index }})"
                                                 wire:loading.attr="disabled"
                                                 accept="image/*"
                                                 class="hidden"
@@ -1201,23 +1241,45 @@ new class extends Component {
                                             </div>
                                         </label>
                                     @endif
-                                </div>
-                                @if(($bill['extracting_payment'] ?? false))
-                                    <div class="mt-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                                        <div class="flex items-start gap-2">
-                                            <svg class="animate-spin h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24">
-                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                            </svg>
-                                            <div class="flex-1">
-                                                <p class="font-medium text-blue-900 dark:text-blue-100 text-xs mb-1">Memproses...</p>
-                                                @if($bill['extraction_step_payment'] ?? '')
-                                                    <p class="text-xs text-blue-700 dark:text-blue-300">{{ $bill['extraction_step_payment'] }}</p>
-                                                @endif
+
+                                    @if(($bill['extracting_payment'] ?? false))
+                                        <div class="mt-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                                            <div class="flex items-start gap-2">
+                                                <svg class="animate-spin h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                </svg>
+                                                <div class="flex-1">
+                                                    <p class="font-medium text-blue-900 dark:text-blue-100 text-xs mb-1">Memproses...</p>
+                                                    @if($bill['extraction_step_payment'] ?? '')
+                                                        <p class="text-xs text-blue-700 dark:text-blue-300">{{ $bill['extraction_step_payment'] }}</p>
+                                                    @endif
+                                                </div>
                                             </div>
                                         </div>
+                                    @endif
+
+                                    <!-- Payment Amount Field - Inside Payment Proof Section -->
+                                    <div class="mt-4">
+                                        <div
+                                            x-data="{}"
+                                            @force-currency-update.window="
+                                                if ($event.detail && $event.detail.model === 'extractedBills.{{ $index }}.payment_amount') {
+                                                    $wire.call('updateExtractedCurrencyValue', {{ $index }}, 'payment_amount', $event.detail.value);
+                                                    $wire.set('extractedBills.{{ $index }}.payment_amount', $event.detail.value);
+                                                }
+                                            ">
+                                            <x-ui.currency-input
+                                                label="Jumlah Pembayaran"
+                                                name="extractedBills.{{ $index }}.payment_amount"
+                                                :value="$bill['payment_amount']"
+                                                wireModel="extractedBills.{{ $index }}.payment_amount"
+                                                placeholder="0"
+                                                required
+                                            />
+                                        </div>
                                     </div>
-                                @endif
+                                </div>
                             </div>
 
                             <!-- Bill Proof -->
@@ -1226,8 +1288,8 @@ new class extends Component {
                                     <h4 class="text-xs font-semibold text-neutral-900 dark:text-neutral-100">Bukti Tagihan</h4>
                                     <span class="px-1.5 py-0.5 text-xs bg-neutral-100 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-400 rounded">Opsional</span>
                                 </div>
-                                <div 
-                                    x-data="{ 
+                                <div
+                                    x-data="{
                                         isDragging: false,
                                         handleDrop(e) {
                                             this.isDragging = false;
@@ -1262,7 +1324,15 @@ new class extends Component {
                                                 </svg>
                                             </div>
                                         </div>
-                                        <label 
+                                        @if($bill['total_amount'] > 0 && !($bill['extracting_bill'] ?? false))
+                                            <div class="mb-2 p-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                                                <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">Jumlah yang diekstrak:</p>
+                                                <p class="text-base font-semibold text-green-600 dark:text-green-400">
+                                                    Rp {{ \App\Helpers\CurrencyHelper::format($bill['total_amount']) }}
+                                                </p>
+                                            </div>
+                                        @endif
+                                        <label
                                             for="extracted_bill_image_{{ $index }}"
                                             class="flex items-center justify-center w-full px-3 py-1.5 border-2 border-dashed border-neutral-300 dark:border-neutral-600 rounded-lg cursor-pointer transition-colors hover:border-blue-400 dark:hover:border-blue-500 bg-white dark:bg-neutral-800 text-xs"
                                         >
@@ -1270,18 +1340,17 @@ new class extends Component {
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                                             </svg>
                                             <span class="text-neutral-600 dark:text-neutral-400 font-medium">Upload Baru</span>
-                                            <input 
-                                                type="file" 
+                                            <input
+                                                type="file"
                                                 id="extracted_bill_image_{{ $index }}"
                                                 wire:model="extractedBills.{{ $index }}.bill_image"
-                                                wire:change="$wire.handleBillImageUpdate('extracted', {{ $index }})"
                                                 wire:loading.attr="disabled"
                                                 accept="image/*"
                                                 class="hidden"
                                             />
                                         </label>
                                     @else
-                                        <label 
+                                        <label
                                             for="extracted_bill_image_{{ $index }}"
                                             class="relative flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer transition-colors overflow-hidden"
                                             :class="isDragging ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'border-neutral-300 dark:border-neutral-600 hover:border-blue-400 dark:hover:border-blue-500'"
@@ -1294,11 +1363,10 @@ new class extends Component {
                                                     <span class="font-semibold">Klik untuk upload</span><br>atau drag and drop
                                                 </p>
                                             </div>
-                                            <input 
-                                                type="file" 
+                                            <input
+                                                type="file"
                                                 id="extracted_bill_image_{{ $index }}"
                                                 wire:model="extractedBills.{{ $index }}.bill_image"
-                                                wire:change="$wire.handleBillImageUpdate('extracted', {{ $index }})"
                                                 wire:loading.attr="disabled"
                                                 accept="image/*"
                                                 class="hidden"
@@ -1311,23 +1379,45 @@ new class extends Component {
                                             </div>
                                         </label>
                                     @endif
-                                </div>
-                                @if(($bill['extracting_bill'] ?? false))
-                                    <div class="mt-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                                        <div class="flex items-start gap-2">
-                                            <svg class="animate-spin h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24">
-                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                            </svg>
-                                            <div class="flex-1">
-                                                <p class="font-medium text-blue-900 dark:text-blue-100 text-xs mb-1">Memproses...</p>
-                                                @if($bill['extraction_step_bill'] ?? '')
-                                                    <p class="text-xs text-blue-700 dark:text-blue-300">{{ $bill['extraction_step_bill'] }}</p>
-                                                @endif
+
+                                    @if(($bill['extracting_bill'] ?? false))
+                                        <div class="mt-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                                            <div class="flex items-start gap-2">
+                                                <svg class="animate-spin h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                </svg>
+                                                <div class="flex-1">
+                                                    <p class="font-medium text-blue-900 dark:text-blue-100 text-xs mb-1">Memproses...</p>
+                                                    @if($bill['extraction_step_bill'] ?? '')
+                                                        <p class="text-xs text-blue-700 dark:text-blue-300">{{ $bill['extraction_step_bill'] }}</p>
+                                                    @endif
+                                                </div>
                                             </div>
                                         </div>
+                                    @endif
+
+                                    <!-- Total Tagihan Field - Inside Bill Proof Section -->
+                                    <div class="mt-4">
+                                        <div
+                                            x-data="{}"
+                                            @force-currency-update.window="
+                                                if ($event.detail && $event.detail.model === 'extractedBills.{{ $index }}.total_amount') {
+                                                    $wire.call('updateExtractedCurrencyValue', {{ $index }}, 'total_amount', $event.detail.value);
+                                                    $wire.set('extractedBills.{{ $index }}.total_amount', $event.detail.value);
+                                                }
+                                            ">
+                                            <x-ui.currency-input
+                                                label="Total Tagihan"
+                                                name="extractedBills.{{ $index }}.total_amount"
+                                                :value="$bill['total_amount']"
+                                                wireModel="extractedBills.{{ $index }}.total_amount"
+                                                placeholder="0"
+                                                required
+                                            />
+                                        </div>
                                     </div>
-                                @endif
+                                </div>
                             </div>
                         </div>
 
@@ -1336,21 +1426,46 @@ new class extends Component {
                             <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-2">
                                 Pilih Cabang:
                             </label>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-40 overflow-y-auto">
-                                @foreach(\App\Models\Branch::orderBy('name', 'asc')->get() as $branch)
-                                    <label class="flex items-center gap-2 p-1.5 rounded border border-neutral-300 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            wire:click="toggleBranch({{ $index }}, {{ $branch->id }})"
-                                            @if(in_array($branch->id, $branchAssignments[$index] ?? [])) checked @endif
-                                            class="rounded border-neutral-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                        >
-                                        <span class="text-xs text-neutral-900 dark:text-neutral-100">{{ $branch->name }}</span>
-                                    </label>
-                                @endforeach
+                            @if(!($extractedBills[$index]['show_new_branch'] ?? false))
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-40 overflow-y-auto mb-3">
+                                    @foreach(\App\Models\Branch::orderBy('name', 'asc')->get() as $branch)
+                                        <label class="flex items-center gap-2 p-1.5 rounded border border-neutral-300 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                wire:click="toggleBranch({{ $index }}, {{ $branch->id }})"
+                                                @if(in_array($branch->id, $branchAssignments[$index] ?? [])) checked @endif
+                                                class="rounded border-neutral-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                                            >
+                                            <span class="text-xs text-neutral-900 dark:text-neutral-100">{{ $branch->name }}</span>
+                                        </label>
+                                    @endforeach
+                                </div>
+                            @else
+                                <div class="mb-3">
+                                    <x-ui.input
+                                        label="Nama Cabang Baru"
+                                        name="extractedBills.{{ $index }}.new_branch_name"
+                                        wire:model="extractedBills.{{ $index }}.new_branch_name"
+                                        placeholder="Masukkan nama cabang"
+                                        required
+                                    />
+                                </div>
+                            @endif
+                            <div class="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="new_branch_extracted_{{ $index }}"
+                                    wire:model.live="extractedBills.{{ $index }}.show_new_branch"
+                                    class="w-3.5 h-3.5 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <label for="new_branch_extracted_{{ $index }}" class="text-xs font-medium text-neutral-700 dark:text-neutral-300 cursor-pointer">
+                                    Tambah cabang baru
+                                </label>
                             </div>
                             @if(empty($branchAssignments[$index]) || count($branchAssignments[$index]) === 0)
-                                <p class="text-xs text-red-600 dark:text-red-400 mt-1">* Pilih minimal satu cabang</p>
+                                @if(!($extractedBills[$index]['show_new_branch'] ?? false))
+                                    <p class="text-xs text-red-600 dark:text-red-400 mt-1">* Pilih minimal satu cabang</p>
+                                @endif
                             @endif
                         </div>
                     </div>
@@ -1387,51 +1502,15 @@ new class extends Component {
 
                     <!-- Manual Bill Form -->
                     <div class="space-y-3">
-                        <!-- Amounts and Date -->
-                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                            <div
-                                x-data="{}"
-                                @force-currency-update.window="
-                                    if ($event.detail && $event.detail.model === 'manualBills.{{ $manualIndex }}.total_amount') {
-                                        \$wire.call('updateManualCurrencyValue', {{ $manualIndex }}, 'total_amount', $event.detail.value);
-                                        \$wire.set('manualBills.{{ $manualIndex }}.total_amount', $event.detail.value);
-                                    }
-                                ">
-                                <x-ui.currency-input 
-                                    label="Total Tagihan" 
-                                    name="manualBills.{{ $manualIndex }}.total_amount" 
-                                    :value="$bill['total_amount']"
-                                    wireModel="manualBills.{{ $manualIndex }}.total_amount"
-                                    placeholder="0"
-                                    required
-                                />
-                            </div>
-                            <div
-                                x-data="{}"
-                                @force-currency-update.window="
-                                    if ($event.detail && $event.detail.model === 'manualBills.{{ $manualIndex }}.payment_amount') {
-                                        \$wire.call('updateManualCurrencyValue', {{ $manualIndex }}, 'payment_amount', $event.detail.value);
-                                        \$wire.set('manualBills.{{ $manualIndex }}.payment_amount', $event.detail.value);
-                                    }
-                                ">
-                                <x-ui.currency-input 
-                                    label="Jumlah Pembayaran" 
-                                    name="manualBills.{{ $manualIndex }}.payment_amount" 
-                                    :value="$bill['payment_amount']"
-                                    wireModel="manualBills.{{ $manualIndex }}.payment_amount"
-                                    placeholder="0"
-                                    required
-                                />
-                            </div>
-                            <div>
-                                <x-ui.input 
-                                    label="Tanggal Transaksi" 
-                                    name="manualBills.{{ $manualIndex }}.date" 
-                                    type="date"
-                                    wire:model="manualBills.{{ $manualIndex }}.date"
-                                    required
-                                />
-                            </div>
+                        <!-- Date -->
+                        <div>
+                            <x-ui.input
+                                label="Tanggal Transaksi"
+                                name="manualBills.{{ $manualIndex }}.date"
+                                type="date"
+                                wire:model="manualBills.{{ $manualIndex }}.date"
+                                required
+                            />
                         </div>
 
                         <!-- Images Upload - Compact -->
@@ -1443,8 +1522,8 @@ new class extends Component {
                                     <span class="px-1.5 py-0.5 text-xs bg-neutral-100 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-400 rounded">Opsional</span>
                                 </div>
 
-                                <div 
-                                    x-data="{ 
+                                <div
+                                    x-data="{
                                         isDragging: false,
                                         handleDrop(e) {
                                             this.isDragging = false;
@@ -1482,8 +1561,16 @@ new class extends Component {
                                                 </div>
                                             </div>
                                         </div>
-                                        
-                                        <label 
+                                        @if($bill['payment_amount'] > 0 && !($bill['extracting_payment'] ?? false))
+                                            <div class="mb-2 p-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                                                <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">Jumlah yang diekstrak:</p>
+                                                <p class="text-base font-semibold text-green-600 dark:text-green-400">
+                                                    Rp {{ \App\Helpers\CurrencyHelper::format($bill['payment_amount']) }}
+                                                </p>
+                                            </div>
+                                        @endif
+
+                                        <label
                                             for="manual_payment_proof_{{ $manualIndex }}"
                                             class="flex items-center justify-center w-full px-3 py-1.5 border-2 border-dashed border-neutral-300 dark:border-neutral-600 rounded-lg cursor-pointer transition-colors hover:border-blue-400 dark:hover:border-blue-500 bg-white dark:bg-neutral-800 text-xs"
                                         >
@@ -1491,18 +1578,17 @@ new class extends Component {
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                                             </svg>
                                             <span class="text-neutral-600 dark:text-neutral-400 font-medium">Upload Baru</span>
-                                            <input 
-                                                type="file" 
+                                            <input
+                                                type="file"
                                                 id="manual_payment_proof_{{ $manualIndex }}"
                                                 wire:model="manualBills.{{ $manualIndex }}.payment_proof_image"
-                                                wire:change="$wire.handlePaymentImageUpdate('manual', {{ $manualIndex }})"
                                                 wire:loading.attr="disabled"
                                                 accept="image/*"
                                                 class="hidden"
                                             />
                                         </label>
                                     @else
-                                        <label 
+                                        <label
                                             for="manual_payment_proof_{{ $manualIndex }}"
                                             class="relative flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer transition-colors overflow-hidden"
                                             :class="isDragging ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'border-neutral-300 dark:border-neutral-600 hover:border-blue-400 dark:hover:border-blue-500'"
@@ -1517,11 +1603,10 @@ new class extends Component {
                                                     </p>
                                                 </div>
                                             </div>
-                                            <input 
-                                                type="file" 
+                                            <input
+                                                type="file"
                                                 id="manual_payment_proof_{{ $manualIndex }}"
                                                 wire:model="manualBills.{{ $manualIndex }}.payment_proof_image"
-                                                wire:change="$wire.handlePaymentImageUpdate('manual', {{ $manualIndex }})"
                                                 wire:loading.attr="disabled"
                                                 accept="image/*"
                                                 class="hidden"
@@ -1555,6 +1640,27 @@ new class extends Component {
                                         </div>
                                     </div>
                                 @endif
+
+                                <!-- Payment Amount Field - Inside Payment Proof Section -->
+                                <div class="mt-4">
+                                    <div
+                                        x-data="{}"
+                                        @force-currency-update.window="
+                                            if ($event.detail && $event.detail.model === 'manualBills.{{ $manualIndex }}.payment_amount') {
+                                                $wire.call('updateManualCurrencyValue', {{ $manualIndex }}, 'payment_amount', $event.detail.value);
+                                                $wire.set('manualBills.{{ $manualIndex }}.payment_amount', $event.detail.value);
+                                            }
+                                        ">
+                                        <x-ui.currency-input
+                                            label="Jumlah Pembayaran"
+                                            name="manualBills.{{ $manualIndex }}.payment_amount"
+                                            :value="$bill['payment_amount']"
+                                            wireModel="manualBills.{{ $manualIndex }}.payment_amount"
+                                            placeholder="0"
+                                            required
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Bill Proof -->
@@ -1564,8 +1670,8 @@ new class extends Component {
                                     <span class="px-1.5 py-0.5 text-xs bg-neutral-100 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-400 rounded">Opsional</span>
                                 </div>
 
-                                <div 
-                                    x-data="{ 
+                                <div
+                                    x-data="{
                                         isDragging: false,
                                         handleDrop(e) {
                                             this.isDragging = false;
@@ -1603,8 +1709,16 @@ new class extends Component {
                                                 </div>
                                             </div>
                                         </div>
-                                        
-                                        <label 
+                                        @if($bill['total_amount'] > 0 && !($bill['extracting_bill'] ?? false))
+                                            <div class="mb-2 p-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                                                <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">Jumlah yang diekstrak:</p>
+                                                <p class="text-base font-semibold text-green-600 dark:text-green-400">
+                                                    Rp {{ \App\Helpers\CurrencyHelper::format($bill['total_amount']) }}
+                                                </p>
+                                            </div>
+                                        @endif
+
+                                        <label
                                             for="manual_bill_image_{{ $manualIndex }}"
                                             class="flex items-center justify-center w-full px-3 py-1.5 border-2 border-dashed border-neutral-300 dark:border-neutral-600 rounded-lg cursor-pointer transition-colors hover:border-blue-400 dark:hover:border-blue-500 bg-white dark:bg-neutral-800 text-xs"
                                         >
@@ -1612,18 +1726,17 @@ new class extends Component {
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                                             </svg>
                                             <span class="text-neutral-600 dark:text-neutral-400 font-medium">Upload Baru</span>
-                                            <input 
-                                                type="file" 
+                                            <input
+                                                type="file"
                                                 id="manual_bill_image_{{ $manualIndex }}"
                                                 wire:model="manualBills.{{ $manualIndex }}.bill_image"
-                                                wire:change="$wire.handleBillImageUpdate('manual', {{ $manualIndex }})"
                                                 wire:loading.attr="disabled"
                                                 accept="image/*"
                                                 class="hidden"
                                             />
                                         </label>
                                     @else
-                                        <label 
+                                        <label
                                             for="manual_bill_image_{{ $manualIndex }}"
                                             class="relative flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer transition-colors overflow-hidden"
                                             :class="isDragging ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'border-neutral-300 dark:border-neutral-600 hover:border-blue-400 dark:hover:border-blue-500'"
@@ -1638,11 +1751,10 @@ new class extends Component {
                                                     </p>
                                                 </div>
                                             </div>
-                                            <input 
-                                                type="file" 
+                                            <input
+                                                type="file"
                                                 id="manual_bill_image_{{ $manualIndex }}"
                                                 wire:model="manualBills.{{ $manualIndex }}.bill_image"
-                                                wire:change="$wire.handleBillImageUpdate('manual', {{ $manualIndex }})"
                                                 wire:loading.attr="disabled"
                                                 accept="image/*"
                                                 class="hidden"
@@ -1676,6 +1788,27 @@ new class extends Component {
                                         </div>
                                     </div>
                                 @endif
+
+                                <!-- Total Tagihan Field - Inside Bill Proof Section -->
+                                <div class="mt-4">
+                                    <div
+                                        x-data="{}"
+                                        @force-currency-update.window="
+                                            if ($event.detail && $event.detail.model === 'manualBills.{{ $manualIndex }}.total_amount') {
+                                                $wire.call('updateManualCurrencyValue', {{ $manualIndex }}, 'total_amount', $event.detail.value);
+                                                $wire.set('manualBills.{{ $manualIndex }}.total_amount', $event.detail.value);
+                                            }
+                                        ">
+                                        <x-ui.currency-input
+                                            label="Total Tagihan"
+                                            name="manualBills.{{ $manualIndex }}.total_amount"
+                                            :value="$bill['total_amount']"
+                                            wireModel="manualBills.{{ $manualIndex }}.total_amount"
+                                            placeholder="0"
+                                            required
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -1684,21 +1817,46 @@ new class extends Component {
                             <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-2">
                                 Pilih Cabang:
                             </label>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-40 overflow-y-auto">
-                                @foreach(\App\Models\Branch::orderBy('name', 'asc')->get() as $branch)
-                                    <label class="flex items-center gap-2 p-1.5 rounded border border-neutral-300 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            wire:click="toggleBranch({{ $index }}, {{ $branch->id }})"
-                                            @if(in_array($branch->id, $branchAssignments[$index] ?? [])) checked @endif
-                                            class="rounded border-neutral-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                        >
-                                        <span class="text-xs text-neutral-900 dark:text-neutral-100">{{ $branch->name }}</span>
-                                    </label>
-                                @endforeach
+                            @if(!($bill['show_new_branch'] ?? false))
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-40 overflow-y-auto mb-3">
+                                    @foreach(\App\Models\Branch::orderBy('name', 'asc')->get() as $branch)
+                                        <label class="flex items-center gap-2 p-1.5 rounded border border-neutral-300 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                wire:click="toggleBranch({{ $index }}, {{ $branch->id }})"
+                                                @if(in_array($branch->id, $branchAssignments[$index] ?? [])) checked @endif
+                                                class="rounded border-neutral-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                                            >
+                                            <span class="text-xs text-neutral-900 dark:text-neutral-100">{{ $branch->name }}</span>
+                                        </label>
+                                    @endforeach
+                                </div>
+                            @else
+                                <div class="mb-3">
+                                    <x-ui.input
+                                        label="Nama Cabang Baru"
+                                        name="manualBills.{{ $manualIndex }}.new_branch_name"
+                                        wire:model="manualBills.{{ $manualIndex }}.new_branch_name"
+                                        placeholder="Masukkan nama cabang"
+                                        required
+                                    />
+                                </div>
+                            @endif
+                            <div class="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="new_branch_manual_{{ $manualIndex }}"
+                                    wire:model.live="manualBills.{{ $manualIndex }}.show_new_branch"
+                                    class="w-3.5 h-3.5 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <label for="new_branch_manual_{{ $manualIndex }}" class="text-xs font-medium text-neutral-700 dark:text-neutral-300 cursor-pointer">
+                                    Tambah cabang baru
+                                </label>
                             </div>
                             @if(empty($branchAssignments[$index]) || count($branchAssignments[$index]) === 0)
-                                <p class="text-xs text-red-600 dark:text-red-400 mt-1">* Pilih minimal satu cabang</p>
+                                @if(!($bill['show_new_branch'] ?? false))
+                                    <p class="text-xs text-red-600 dark:text-red-400 mt-1">* Pilih minimal satu cabang</p>
+                                @endif
                             @endif
                         </div>
                     </div>
@@ -1745,27 +1903,27 @@ new class extends Component {
         const updateCurrencyInput = (index, type, amount) => {
             const fieldName = type === 'total' ? 'total_amount' : 'payment_amount';
             const inputName = `manualBills.${index}.${fieldName}`;
-            
+
             // Try multiple times with delay to ensure element is available
             let attempts = 0;
             const maxAttempts = 10;
-            
+
             const tryUpdate = () => {
                 attempts++;
                 const inputElement = document.querySelector(`input[name="${inputName}"]`);
-                
+
                 if (inputElement) {
                     // Format the amount for display
                     const formatted = formatCurrencyValue(amount);
-                    
+
                     // Update the input value directly
                     inputElement.value = formatted;
-                    
+
                     // Trigger multiple events to ensure Alpine.js detects the change
                     inputElement.dispatchEvent(new Event('input', { bubbles: true }));
                     inputElement.dispatchEvent(new Event('change', { bubbles: true }));
                     inputElement.dispatchEvent(new Event('blur', { bubbles: true }));
-                    
+
                     // Also update via Livewire
                     try {
                         const component = Livewire.find(@js($this->getId()));
@@ -1775,7 +1933,7 @@ new class extends Component {
                     } catch(e) {
                         console.warn('Livewire update failed:', e);
                     }
-                    
+
                     // Force Alpine.js to update by accessing the Alpine data
                     if (inputElement._x_dataStack && inputElement._x_dataStack[0]) {
                         const alpineData = inputElement._x_dataStack[0];
@@ -1787,10 +1945,10 @@ new class extends Component {
                     setTimeout(tryUpdate, 100);
                 }
             };
-            
+
             setTimeout(tryUpdate, 100);
         };
-        
+
         // Listen for amount-extracted event
         Livewire.on('amount-extracted', (eventData) => {
             const data = Array.isArray(eventData) ? eventData[0] : eventData;
@@ -1798,7 +1956,7 @@ new class extends Component {
                 updateCurrencyInput(data.index, data.type, data.amount);
             }
         });
-        
+
         // Also listen for extraction-completed as fallback
         Livewire.on('extraction-completed', (eventData) => {
             const data = Array.isArray(eventData) ? eventData[0] : eventData;
@@ -1817,17 +1975,17 @@ new class extends Component {
             }
         });
     });
-    
+
     // Format currency value helper function (shared)
     if (typeof formatCurrencyValue === 'undefined') {
         window.formatCurrencyValue = function(value) {
             if (!value || value === 0) return '';
-            
+
             const num = parseFloat(value) || 0;
             const parts = num.toFixed(2).split('.');
             const integerPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
             const decimalPart = parts[1];
-            
+
             if (decimalPart === '00' || decimalPart === '0') {
                 return integerPart;
             }

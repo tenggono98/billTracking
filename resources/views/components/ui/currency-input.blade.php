@@ -12,21 +12,21 @@
     $formattedValue = $value ? \App\Helpers\CurrencyHelper::format($value) : '';
 @endphp
 
-<div class="grid gap-1.5 sm:gap-2" 
+<div class="grid gap-1.5 sm:gap-2"
      wire:key="currency-wrapper-{{ $wireModel }}"
      x-data="{
         formattedValue: @js($formattedValue),
         wireModel: @js($wireModel),
          formatCurrency(value) {
              if (!value || value === '') return '';
-             
+
              // Remove all non-numeric except comma and dot
              let cleaned = String(value).replace(/[^\d,.]/g, '');
-             
+
              // Handle Indonesian format: dot (.) = thousand, comma (,) = decimal
              // Convert to number for processing
              let numStr = cleaned;
-             
+
              // If has comma, treat as decimal separator
              if (cleaned.includes(',')) {
                  numStr = cleaned.replace(/\./g, ''); // Remove dots (thousand separators)
@@ -42,14 +42,14 @@
                      numStr = cleaned.replace(/\./g, '');
                  }
              }
-             
+
              const num = parseFloat(numStr) || 0;
-             
+
              // Format with Indonesian format: dot (.) = thousand, comma (,) = decimal
              const parts = num.toFixed(2).split('.');
              const integerPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
              const decimalPart = parts[1];
-             
+
              if (decimalPart === '00' || decimalPart === '0') {
                  return integerPart;
              }
@@ -57,13 +57,13 @@
          },
         handleInput(event) {
             let input = event.target.value;
-            
+
             // Allow only numbers, dots, and commas
             input = input.replace(/[^\d,.]/g, '');
-            
+
             // Format the display value
             this.formattedValue = this.formatCurrency(input);
-            
+
             // Extract numeric value for Livewire
             let numStr = input;
             if (numStr.includes(',')) {
@@ -78,9 +78,9 @@
                     numStr = numStr.replace(/\./g, '');
                 }
             }
-            
+
             const num = parseFloat(numStr) || 0;
-            
+
             // Update Livewire model
             if (this.wireModel && $wire) {
                 $wire.set(this.wireModel, num);
@@ -100,7 +100,7 @@
             }
         }
      }"
-     x-init="
+     x-init="(() => {
         // Sync with Livewire value when it changes externally
         if (wireModel) {
             // Function to update formatted value from numeric value
@@ -117,38 +117,38 @@
                     }
                     return;
                 }
-                
+
                 // Convert to number for processing
                 const numValue = parseFloat(value) || 0;
-                
+
                 // Format the value (including 0)
                 const formatted = numValue > 0 ? formatCurrency(String(numValue)) : (numValue === 0 ? '0' : '');
-                
+
                 // CRITICAL: Update Alpine.js reactive property first - this is the main data binding
                 formattedValue = formatted;
-                
+
                 // Direct DOM manipulation to ensure input field is updated
                 const inputElement = $el.querySelector('input[type=\'text\']');
                 if (inputElement) {
                     // Update DOM value
                     inputElement.value = formatted;
-                    
+
                     // Force Alpine.js reactivity by accessing the reactive property
                     // This ensures x-model binding is updated
                     if (inputElement._x_model) {
                         // Alpine.js v3 model binding
                         inputElement._x_model.set(formatted);
                     }
-                    
+
                     // Also update via Alpine's data stack if available
                     if (inputElement._x_dataStack && inputElement._x_dataStack[0]) {
                         inputElement._x_dataStack[0].formattedValue = formatted;
                     }
-                    
+
                     // Trigger events to ensure Alpine.js detects the change
                     inputElement.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
                     inputElement.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-                    
+
                     // Multiple fallback updates with delays to ensure it works
                     setTimeout(() => {
                         formattedValue = formatted;
@@ -160,7 +160,7 @@
                             inputElement.dispatchEvent(new Event('input', { bubbles: true }));
                         }
                     }, 50);
-                    
+
                     setTimeout(() => {
                         formattedValue = formatted;
                         if (inputElement) {
@@ -171,7 +171,7 @@
                             inputElement.dispatchEvent(new Event('input', { bubbles: true }));
                         }
                     }, 150);
-                    
+
                     setTimeout(() => {
                         formattedValue = formatted;
                         if (inputElement) {
@@ -183,7 +183,7 @@
                     }, 300);
                 }
             };
-             
+
             // Watch for changes in the Livewire property - use multiple approaches for reliability
             // In Livewire 3, use polling and event-based updates for nested properties
             const modelParts = wireModel.split('.');
@@ -191,7 +191,7 @@
                 const arrayName = modelParts[0]; // 'bills' or 'manualBills'
                 const index = parseInt(modelParts[1]);
                 const fieldName = modelParts[2];
-                
+
                 // Approach 1: Poll the Livewire value periodically to catch updates
                 // This is more reliable than watching nested properties in Alpine.js
                 let lastValue = null;
@@ -211,17 +211,17 @@
                         // Ignore errors
                     }
                 };
-                
+
                 // Poll every 200ms to catch updates quickly
                 const valuePollInterval = setInterval(checkValue, 200);
-                
+
                 // Stop polling after component is destroyed
                 $el.addEventListener('livewire:unload', () => {
                     if (valuePollInterval) {
                         clearInterval(valuePollInterval);
                     }
                 });
-                
+
                 // Also try direct watch on the nested property path using $wire.get()
                 // In Livewire 3, we can watch nested properties directly
                 try {
@@ -250,7 +250,7 @@
                     console.warn('Watch failed, using fallback:', e);
                 }
             }
-             
+
             // Approach 3: Listen for amount-extracted event and directly update
             // In Livewire 3, use $wire.on() for component-level events
             $wire.on('amount-extracted', (event) => {
@@ -258,17 +258,17 @@
                 if (eventData && eventData.index !== undefined && eventData.amount !== undefined && eventData.type) {
                     const eventIndex = parseInt(eventData.index);
                     const modelParts = wireModel.split('.');
-                    
+
                     if (modelParts.length >= 3) {
                         const arrayName = modelParts[0];
                         const modelIndex = parseInt(modelParts[1]);
                         const fieldName = modelParts[2];
-                        
+
                         // Check if this event is for our field
                         if (modelIndex === eventIndex) {
                             const isMatch = (eventData.type === 'total' && fieldName === 'total_amount') ||
                                           (eventData.type === 'payment' && fieldName === 'payment_amount');
-                            
+
                             if (isMatch && eventData.amount > 0) {
                                 // In Livewire 3, use $wire.set() for nested properties
                                 // Update Livewire property first
@@ -277,23 +277,23 @@
                                 } catch(e) {
                                     console.warn('Failed to set wireModel:', e);
                                 }
-                                
+
                                 // Immediately update formatted value - this is the main update
                                 updateFromValue(eventData.amount);
-                                
+
                                 // Force multiple updates to ensure it works
                                 setTimeout(() => {
                                     updateFromValue(eventData.amount);
                                 }, 10);
-                                
+
                                 setTimeout(() => {
                                     updateFromValue(eventData.amount);
                                 }, 50);
-                                
+
                                 setTimeout(() => {
                                     updateFromValue(eventData.amount);
                                 }, 150);
-                                
+
                                 setTimeout(() => {
                                     // Check current value from Livewire and update
                                     try {
@@ -310,7 +310,7 @@
                                         updateFromValue(eventData.amount);
                                     }
                                 }, 300);
-                                
+
                                 setTimeout(() => {
                                     // Final check and update
                                     updateFromValue(eventData.amount);
@@ -320,7 +320,7 @@
                     }
                 }
             });
-             
+
             // Approach 4: Listen for update-currency-input event (direct update command)
             $wire.on('update-currency-input', (event) => {
                 const eventData = Array.isArray(event) ? event[0] : event;
@@ -329,14 +329,14 @@
                     $wire.set(wireModel, eventData.value);
                     // Then update formatted value immediately
                     updateFromValue(eventData.value);
-                    
+
                     // Multiple fallback updates
                     setTimeout(() => updateFromValue(eventData.value), 10);
                     setTimeout(() => updateFromValue(eventData.value), 50);
                     setTimeout(() => updateFromValue(eventData.value), 150);
                 }
             });
-            
+
             // Approach 5: Listen for force-currency-update event (most reliable)
             $wire.on('force-currency-update', (event) => {
                 const eventData = Array.isArray(event) ? event[0] : event;
@@ -345,12 +345,12 @@
                     $wire.set(wireModel, eventData.value);
                     // Then update formatted value immediately
                     updateFromValue(eventData.value);
-                    
+
                     // Multiple fallback updates to ensure it works
                     setTimeout(() => updateFromValue(eventData.value), 10);
                     setTimeout(() => updateFromValue(eventData.value), 50);
                     setTimeout(() => updateFromValue(eventData.value), 150);
-                    
+
                     setTimeout(() => {
                         // Check current value from Livewire
                         try {
@@ -368,7 +368,7 @@
                     }, 300);
                 }
             });
-             
+
             // Approach 6: Listen for browser event currency-value-updated (fallback)
             // Listen for Livewire event that gets converted to browser event
             if (typeof Livewire !== 'undefined') {
@@ -382,7 +382,7 @@
                     }
                 });
             }
-            
+
             // Also listen for native browser event (fallback)
             window.addEventListener('currency-value-updated', (e) => {
                 const eventData = e.detail || e;
@@ -393,12 +393,12 @@
                     updateFromValue(eventData.value);
                 }
             });
-             
+
             // Polling fallback - check value during extraction
             let pollInterval = null;
             let pollAttempts = 0;
             const maxPollAttempts = 20; // Poll for up to 6 seconds (20 * 300ms)
-            
+
             $wire.on('extraction-started', (event) => {
                 const eventData = Array.isArray(event) ? event[0] : event;
                 if (pollInterval) {
@@ -406,18 +406,18 @@
                     pollInterval = null;
                 }
                 pollAttempts = 0;
-                
+
                 // Check if this extraction is for our field
                 const modelParts = wireModel.split('.');
                 if (modelParts.length >= 3 && eventData) {
                     const modelIndex = parseInt(modelParts[1]);
                     const fieldName = modelParts[2];
                     const eventIndex = parseInt(eventData.index);
-                    
+
                     if (modelIndex === eventIndex) {
                         const isMatch = (eventData.type === 'total' && fieldName === 'total_amount') ||
                                       (eventData.type === 'payment' && fieldName === 'payment_amount');
-                        
+
                         if (isMatch) {
                             pollInterval = setInterval(() => {
                                 pollAttempts++;
@@ -447,7 +447,7 @@
                     }
                 }
             });
-            
+
             $wire.on('extraction-completed', (event) => {
                 const eventData = Array.isArray(event) ? event[0] : event;
                 if (pollInterval) {
@@ -455,14 +455,14 @@
                     pollInterval = null;
                     pollAttempts = 0;
                 }
-                
+
                 // Final check if this completion is for our field
                 if (eventData) {
                     const modelParts = wireModel.split('.');
                     if (modelParts.length >= 3) {
                         const modelIndex = parseInt(modelParts[1]);
                         const eventIndex = parseInt(eventData.index);
-                        
+
                         if (modelIndex === eventIndex) {
                             // Try multiple times with increasing delays
                             setTimeout(() => {
@@ -475,7 +475,7 @@
                                     // Ignore errors
                                 }
                             }, 100);
-                            
+
                             setTimeout(() => {
                                 try {
                                     const currentValue = $wire.get(wireModel);
@@ -486,7 +486,7 @@
                                     // Ignore errors
                                 }
                             }, 500);
-                            
+
                             setTimeout(() => {
                                 try {
                                     const currentValue = $wire.get(wireModel);
@@ -502,7 +502,7 @@
                 }
             });
          }
-     ">
+     })()">
     @if($label)
         <label for="{{ $name }}" class="text-xs sm:text-sm font-medium text-neutral-700 dark:text-neutral-300">
             {{ $label }}
@@ -511,7 +511,7 @@
             @endif
         </label>
     @endif
-    
+
     <input
         type="text"
         name="{{ $name }}"
@@ -529,7 +529,7 @@
             'class' => 'w-full rounded-md border border-neutral-300 bg-white px-2.5 py-1.5 text-sm sm:px-3 sm:py-2 text-neutral-900 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-500 focus:ring-offset-1 sm:focus:ring-offset-2 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-200 dark:placeholder-neutral-500 dark:focus:border-neutral-500 dark:focus:ring-neutral-500'
         ]) }}
     />
-    
+
     @if($error)
         <p class="text-xs sm:text-sm text-red-600 dark:text-red-400">{{ $error }}</p>
     @endif
