@@ -216,7 +216,7 @@
         >
             <img
                 :src="images[currentIndex]"
-                :alt="{{ $alt }}"
+                alt="{{ $alt }}"
                 class="max-w-full max-h-full object-contain select-none"
                 :style="`transform: scale(${zoom}) translate(${panX / zoom}px, ${panY / zoom}px); transition: ${isDragging ? 'none' : 'transform 0.2s'};`"
                 draggable="false"
