@@ -165,7 +165,7 @@ new class extends Component {
                         name="phone_number" 
                         type="text"
                         wire:model="phone_number"
-                        placeholder="***REMOVED***"
+                        placeholder="085609022799"
                         maxlength="12"
                     />
                     <x-ui.input 
