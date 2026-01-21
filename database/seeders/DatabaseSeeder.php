@@ -16,22 +16,24 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
-        $user = User::firstOrCreate(
-            ['phone_number' => '***REMOVED***'],
-            [
-                'name' => 'Test User',
-                'email' => 'test@example.com',
-                'pin' => Hash::make('***REMOVED***'),
-                'password' => Hash::make('password'),
-                'email_verified_at' => now(),
-            ]
-        );
-
-        // Ensure pin is set even if user already exists
-        if (!$user->pin || !Hash::check('***REMOVED***', $user->pin)) {
-            $user->pin = Hash::make('***REMOVED***');
-            $user->password = Hash::make('password');
-            $user->save();
+        // Only create default user if explicitly configured in environment
+        if (env('SEEDER_CREATE_DEFAULT_USER', false)) {
+            $user = User::firstOrCreate(
+                ['email' => env('SEEDER_DEFAULT_EMAIL', 'admin@example.com')],
+                [
+                    'name' => env('SEEDER_DEFAULT_NAME', 'Admin User'),
+                    'phone_number' => env('SEEDER_DEFAULT_PHONE', null),
+                    'pin' => Hash::make(env('SEEDER_DEFAULT_PIN', 'change-me')),
+                    'password' => Hash::make(env('SEEDER_DEFAULT_PASSWORD', 'change-me')),
+                    'email_verified_at' => now(),
+                ]
+            );
         }
+
+        // Alternatively, you can use User factories:
+        // User::factory()->create([
+        //     'name' => 'Admin User',
+        //     'email' => 'admin@example.com',
+        // ]);
     }
 }

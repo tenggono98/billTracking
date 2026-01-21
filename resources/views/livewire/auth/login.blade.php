@@ -71,7 +71,7 @@
                     required
                     autofocus
                     autocomplete="tel"
-                    placeholder="***REMOVED***"
+                    placeholder="085609022799"
                     maxlength="12"
                     inputmode="numeric"
                     pattern="[0-9]*"
